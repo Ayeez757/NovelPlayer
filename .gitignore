@@ -1,0 +1,28 @@
+.idea/
+.vscode/
+*.iml
+
+target/
+build/
+out/
+
+node_modules/
+dist/
+.vite/
+
+# 本地环境变量和私有配置。
+.env
+.env.*
+!.env.example
+.env.local
+*.log
+*.tmp
+backend/src/main/resources/application-local.yml
+
+# 本地数据库、容器卷和工具生成目录。
+mysql-data/
+data/
+*.db
+*.mv.db
+*.trace.db
+.github/modernize/

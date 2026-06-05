@@ -1,0 +1,54 @@
+services:
+  # 应用容器：多阶段 Dockerfile 会先构建前端，再打包 Spring Boot。
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # 容器环境默认使用 test 配置环境，连接编排网络内的 mysql 服务。
+      SERVER_PORT: 8080
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-test}
+      NOVEL_PLAYER_MINIMUM_CHAPTERS: ${NOVEL_PLAYER_MINIMUM_CHAPTERS:-3}
+      NOVEL_PLAYER_MOCK_AI: ${NOVEL_PLAYER_MOCK_AI:-true}
+      SPRING_AI_MODEL_CHAT: ${SPRING_AI_MODEL_CHAT:-none}
+      SPRING_AI_MODEL_EMBEDDING: ${SPRING_AI_MODEL_EMBEDDING:-none}
+      SPRING_AI_MODEL_IMAGE: ${SPRING_AI_MODEL_IMAGE:-none}
+      SPRING_AI_MODEL_MODERATION: ${SPRING_AI_MODEL_MODERATION:-none}
+      SPRING_AI_MODEL_AUDIO_SPEECH: ${SPRING_AI_MODEL_AUDIO_SPEECH:-none}
+      SPRING_AI_MODEL_AUDIO_TRANSCRIPTION: ${SPRING_AI_MODEL_AUDIO_TRANSCRIPTION:-none}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
+      DEEPSEEK_TEMPERATURE: ${DEEPSEEK_TEMPERATURE:-0.4}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-novel_player}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-novel}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-novel_pass}
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    # MySQL 容器会根据 MYSQL_DATABASE 自动创建应用数据库。
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-novel_player}
+      MYSQL_USER: ${MYSQL_USER:-novel}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-novel_pass}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_pass}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  mysql-data:
