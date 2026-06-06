@@ -97,12 +97,12 @@ public class GenerationJobService {
             job.markRunning("generation_input");
             // 在真实模型调用前记录参数快照，即使后续失败也能追溯当次生成条件。
             inputSnapshotRecorder.record(job, project, chapters, options);
-            job.moveToStage("script_generation");
-            log.info("Generation job moved to script generation jobId={} projectId={}", job.getId(), projectId);
+            job.moveToStage("staged_script_generation");
+            log.info("Generation job moved to staged script generation jobId={} projectId={}", job.getId(), projectId);
 
             // 以 JSON 和 Java 数据对象作为权威结构，再由后端导出 YAML。
             // 这样不用让模型直接生成缩进敏感的 YAML，演示稳定性更高。
-            ScriptDocument document = pipeline.generate(project, chapters, options);
+            ScriptDocument document = pipeline.generate(job, project, chapters, options);
             String json = scriptJsonMapper.toJson(document);
             String yaml = yamlExporter.export(document);
             ScriptDocumentEntity entity = scriptDocumentRepository.save(new ScriptDocumentEntity(
