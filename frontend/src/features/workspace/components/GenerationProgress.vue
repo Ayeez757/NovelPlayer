@@ -28,10 +28,16 @@ const props = defineProps<{
 }>()
 
 const structureStages = new Set([
-  'preparing_project',
-  'calling_model',
-  'validating_schema',
-  'script_generation'
+  'created',
+  'generation_input',
+  'script_generation',
+  'staged_script_generation',
+  'legacy_script_generation',
+  'chapter_digest',
+  'story_bible',
+  'scene_plan',
+  'scene_draft',
+  'script_assembly'
 ])
 
 const yamlStages = new Set([
@@ -42,10 +48,16 @@ const yamlStages = new Set([
 ])
 
 const stageLabels: Record<string, string> = {
-  preparing_project: '准备章节与改编参数',
+  created: '任务已创建',
+  generation_input: '记录输入快照',
   script_generation: '整体生成',
-  calling_model: '调用模型',
-  validating_schema: '校验剧本结构',
+  staged_script_generation: '多阶段生成',
+  legacy_script_generation: '旧链路生成',
+  chapter_digest: '章节摘要',
+  story_bible: '故事圣经',
+  scene_plan: '场景规划',
+  scene_draft: '分场草稿',
+  script_assembly: '最终组装',
   serializing_json: '序列化 JSON',
   exporting_yaml: '导出 YAML',
   saving_snapshot: '保存结果',
@@ -56,19 +68,19 @@ const stageLabels: Record<string, string> = {
 const activeStep = computed(() => {
   if (props.script) return 3
   if (!props.project) return 0
-  if (yamlStages.has(props.currentStage)) return 2
-  if (props.generating || structureStages.has(props.currentStage)) return 1
+  if (isYamlStage(props.currentStage)) return 2
+  if (props.generating || isStructureStage(props.currentStage)) return 1
   return 1
 })
 
-const currentStageLabel = computed(() => stageLabels[props.currentStage] || '')
+const currentStageLabel = computed(() => resolveStageLabel(props.currentStage))
 
 const structureDescription = computed(() => {
   if (props.script) return '结构化剧本已生成'
-  if (props.generating && structureStages.has(props.currentStage)) {
+  if (props.generating && isStructureStage(props.currentStage)) {
     return props.currentMessage || '正在生成结构化剧本'
   }
-  if (yamlStages.has(props.currentStage)) {
+  if (isYamlStage(props.currentStage)) {
     return '结构化剧本已生成，正在进入导出阶段'
   }
   if (props.project) return '等待开始剧本生成'
@@ -77,9 +89,33 @@ const structureDescription = computed(() => {
 
 const yamlDescription = computed(() => {
   if (props.script) return 'YAML 草稿已生成'
-  if (props.generating && yamlStages.has(props.currentStage)) {
+  if (props.generating && isYamlStage(props.currentStage)) {
     return props.currentMessage || '正在导出 YAML'
   }
   return '等待结构化剧本生成完成'
 })
+
+function isStructureStage(stage: string) {
+  return (
+    structureStages.has(stage) ||
+    stage.startsWith('chapter_digest:') ||
+    stage.startsWith('scene_draft:')
+  )
+}
+
+function isYamlStage(stage: string) {
+  return yamlStages.has(stage)
+}
+
+function resolveStageLabel(stage: string) {
+  if (stage.startsWith('chapter_digest:')) {
+    return `章节摘要 ${stage.slice('chapter_digest:'.length)}`
+  }
+
+  if (stage.startsWith('scene_draft:')) {
+    return `分场草稿 ${stage.slice('scene_draft:'.length)}`
+  }
+
+  return stageLabels[stage] || ''
+}
 </script>
