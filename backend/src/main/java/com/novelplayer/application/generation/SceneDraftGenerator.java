@@ -14,6 +14,7 @@ import com.novelplayer.domain.project.NovelChapter;
 import com.novelplayer.domain.project.NovelProject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
@@ -33,6 +34,8 @@ import java.util.Set;
  * 最小上下文，并以 {@code scene_draft:<sceneId>} 独立落库，方便后续支持单场重生成。</p>
  */
 @Service
+@ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
+        matchIfMissing = true)
 public class SceneDraftGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(SceneDraftGenerator.class);

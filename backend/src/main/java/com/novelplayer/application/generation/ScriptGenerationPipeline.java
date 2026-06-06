@@ -1,16 +1,19 @@
 package com.novelplayer.application.generation;
 
+import com.novelplayer.ai.ScriptAiClient;
 import com.novelplayer.application.generation.model.ChapterDigest;
 import com.novelplayer.application.generation.model.SceneDraft;
 import com.novelplayer.application.generation.model.ScenePlan;
 import com.novelplayer.application.generation.model.StoryBible;
 import com.novelplayer.application.script.ScriptSchemaValidator;
+import com.novelplayer.config.NovelPlayerProperties;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.project.NovelChapter;
 import com.novelplayer.domain.project.NovelProject;
 import com.novelplayer.domain.script.ScriptDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -27,39 +30,47 @@ public class ScriptGenerationPipeline {
 
     private static final Logger log = LoggerFactory.getLogger(ScriptGenerationPipeline.class);
 
-    private final ChapterDigestGenerator chapterDigestGenerator;
-    private final StoryBibleGenerator storyBibleGenerator;
-    private final ScenePlanner scenePlanner;
-    private final SceneDraftGenerator sceneDraftGenerator;
-    private final ScriptAssembler scriptAssembler;
+    private final NovelPlayerProperties properties;
+    private final ScriptAiClient scriptAiClient;
+    private final ObjectProvider<ChapterDigestGenerator> chapterDigestGeneratorProvider;
+    private final ObjectProvider<StoryBibleGenerator> storyBibleGeneratorProvider;
+    private final ObjectProvider<ScenePlanner> scenePlannerProvider;
+    private final ObjectProvider<SceneDraftGenerator> sceneDraftGeneratorProvider;
+    private final ObjectProvider<ScriptAssembler> scriptAssemblerProvider;
     private final ScriptSchemaValidator validator;
 
     /**
-     * 注入阶段化生成组件和最终结构校验器。
+     * 注入旧生成客户端、阶段化生成组件提供器和最终结构校验器。
      *
-     * @param chapterDigestGenerator 章节摘要阶段生成器。
-     * @param storyBibleGenerator 故事圣经阶段生成器。
-     * @param scenePlanner 场景规划阶段生成器。
-     * @param sceneDraftGenerator 分场草稿阶段生成器。
-     * @param scriptAssembler 最终剧本文档组装器。
+     * @param properties 应用配置。
+     * @param scriptAiClient 旧的一次性剧本生成客户端。
+     * @param chapterDigestGeneratorProvider 章节摘要阶段生成器提供器。
+     * @param storyBibleGeneratorProvider 故事圣经阶段生成器提供器。
+     * @param scenePlannerProvider 场景规划阶段生成器提供器。
+     * @param sceneDraftGeneratorProvider 分场草稿阶段生成器提供器。
+     * @param scriptAssemblerProvider 最终剧本文档组装器提供器。
      * @param validator 剧本文档校验器。
      */
-    public ScriptGenerationPipeline(ChapterDigestGenerator chapterDigestGenerator,
-                                    StoryBibleGenerator storyBibleGenerator,
-                                    ScenePlanner scenePlanner,
-                                    SceneDraftGenerator sceneDraftGenerator,
-                                    ScriptAssembler scriptAssembler,
+    public ScriptGenerationPipeline(NovelPlayerProperties properties,
+                                    ScriptAiClient scriptAiClient,
+                                    ObjectProvider<ChapterDigestGenerator> chapterDigestGeneratorProvider,
+                                    ObjectProvider<StoryBibleGenerator> storyBibleGeneratorProvider,
+                                    ObjectProvider<ScenePlanner> scenePlannerProvider,
+                                    ObjectProvider<SceneDraftGenerator> sceneDraftGeneratorProvider,
+                                    ObjectProvider<ScriptAssembler> scriptAssemblerProvider,
                                     ScriptSchemaValidator validator) {
-        this.chapterDigestGenerator = chapterDigestGenerator;
-        this.storyBibleGenerator = storyBibleGenerator;
-        this.scenePlanner = scenePlanner;
-        this.sceneDraftGenerator = sceneDraftGenerator;
-        this.scriptAssembler = scriptAssembler;
+        this.properties = properties;
+        this.scriptAiClient = scriptAiClient;
+        this.chapterDigestGeneratorProvider = chapterDigestGeneratorProvider;
+        this.storyBibleGeneratorProvider = storyBibleGeneratorProvider;
+        this.scenePlannerProvider = scenePlannerProvider;
+        this.sceneDraftGeneratorProvider = sceneDraftGeneratorProvider;
+        this.scriptAssemblerProvider = scriptAssemblerProvider;
         this.validator = validator;
     }
 
     /**
-     * 通过多阶段流水线生成剧本文档并立即做结构校验。
+     * 根据配置选择旧链路或多阶段链路生成剧本文档，并立即做结构校验。
      *
      * @param job 当前生成任务，必须已经持久化。
      * @param project 小说改编项目。
@@ -73,31 +84,77 @@ public class ScriptGenerationPipeline {
         Objects.requireNonNull(project, "project must not be null");
         Objects.requireNonNull(options, "options must not be null");
         List<NovelChapter> normalizedChapters = requireChapters(chapters);
-        log.info("阶段化剧本生成管线启动 jobId={} projectId={} chapterCount={} format={} tone={}",
-                job.getId(), project.getId(), normalizedChapters.size(), options.format(), options.tone());
+        NovelPlayerProperties.Generation.PipelineMode pipelineMode = properties.getGeneration().getPipelineMode();
+        log.info("剧本生成管线启动 jobId={} projectId={} chapterCount={} format={} tone={} pipelineMode={}",
+                job.getId(), project.getId(), normalizedChapters.size(), options.format(), options.tone(), pipelineMode);
 
+        if (pipelineMode == NovelPlayerProperties.Generation.PipelineMode.LEGACY) {
+            return generateLegacy(job, project, normalizedChapters, options);
+        }
+        return generateStaged(job, project, normalizedChapters, options);
+    }
+
+    /**
+     * 通过旧的一次性生成链路生成剧本文档。
+     *
+     * @param job 当前生成任务。
+     * @param project 小说改编项目。
+     * @param chapters 已拆分并持久化的章节。
+     * @param options 改编控制选项。
+     * @return 已通过校验的剧本文档。
+     */
+    private ScriptDocument generateLegacy(GenerationJob job, NovelProject project, List<NovelChapter> chapters,
+                                          GenerationOptions options) {
+        job.moveToStage("legacy_script_generation");
+        log.info("使用旧的一次性剧本生成链路 jobId={} projectId={} chapterCount={}",
+                job.getId(), project.getId(), chapters.size());
+        ScriptDocument document = scriptAiClient.generateScript(project, chapters, options);
+        log.info("旧生成链路返回剧本文档 jobId={} projectId={} schemaVersion={} sceneCount={}",
+                job.getId(), project.getId(), document.schemaVersion(), document.scenes().size());
+        validator.validate(document);
+        log.info("旧生成链路剧本文档校验通过 jobId={} projectId={} schemaVersion={} sceneCount={}",
+                job.getId(), project.getId(), document.schemaVersion(), document.scenes().size());
+        return document;
+    }
+
+    /**
+     * 通过多阶段生成链路生成剧本文档。
+     *
+     * @param job 当前生成任务。
+     * @param project 小说改编项目。
+     * @param chapters 已拆分并持久化的章节。
+     * @param options 改编控制选项。
+     * @return 已通过校验的剧本文档。
+     */
+    private ScriptDocument generateStaged(GenerationJob job, NovelProject project, List<NovelChapter> chapters,
+                                          GenerationOptions options) {
         job.moveToStage("chapter_digest");
-        List<ChapterDigest> digests = chapterDigestGenerator.generate(job, project, normalizedChapters, options);
+        List<ChapterDigest> digests = requireStagedComponent(chapterDigestGeneratorProvider,
+                "ChapterDigestGenerator").generate(job, project, chapters, options);
         log.info("章节摘要阶段完成 jobId={} projectId={} digestCount={}",
                 job.getId(), project.getId(), digests.size());
 
         job.moveToStage(GenerationStageNames.STORY_BIBLE);
-        StoryBible bible = storyBibleGenerator.generate(job, project, digests, options);
+        StoryBible bible = requireStagedComponent(storyBibleGeneratorProvider,
+                "StoryBibleGenerator").generate(job, project, digests, options);
         log.info("故事圣经阶段完成 jobId={} projectId={} characterCount={} locationCount={}",
                 job.getId(), project.getId(), bible.characters().size(), bible.locations().size());
 
         job.moveToStage(GenerationStageNames.SCENE_PLAN);
-        ScenePlan plan = scenePlanner.plan(job, project, digests, bible, options);
+        ScenePlan plan = requireStagedComponent(scenePlannerProvider,
+                "ScenePlanner").plan(job, project, digests, bible, options);
         log.info("场景规划阶段完成 jobId={} projectId={} sceneCount={}",
                 job.getId(), project.getId(), plan.scenes().size());
 
         job.moveToStage("scene_draft");
-        List<SceneDraft> drafts = sceneDraftGenerator.generate(job, project, normalizedChapters, plan, bible, options);
+        List<SceneDraft> drafts = requireStagedComponent(sceneDraftGeneratorProvider,
+                "SceneDraftGenerator").generate(job, project, chapters, plan, bible, options);
         log.info("分场草稿阶段完成 jobId={} projectId={} draftCount={}",
                 job.getId(), project.getId(), drafts.size());
 
         job.moveToStage(GenerationStageNames.SCRIPT_ASSEMBLY);
-        ScriptDocument document = scriptAssembler.assembleDrafts(project, options, bible, plan, drafts);
+        ScriptDocument document = requireStagedComponent(scriptAssemblerProvider,
+                "ScriptAssembler").assembleDrafts(project, options, bible, plan, drafts);
         log.info("最终剧本文档组装完成 jobId={} projectId={} schemaVersion={} sceneCount={}",
                 job.getId(), project.getId(), document.schemaVersion(), document.scenes().size());
 
@@ -106,6 +163,23 @@ public class ScriptGenerationPipeline {
         log.info("剧本文档结构校验通过 jobId={} projectId={} schemaVersion={} sceneCount={}",
                 job.getId(), project.getId(), document.schemaVersion(), document.scenes().size());
         return document;
+    }
+
+    /**
+     * 读取阶段化组件，缺失时给出明确配置错误。
+     *
+     * @param provider Spring 组件提供器。
+     * @param componentName 组件名称。
+     * @return 阶段化组件实例。
+     * @param <T> 组件类型。
+     */
+    private static <T> T requireStagedComponent(ObjectProvider<T> provider, String componentName) {
+        T component = provider.getIfAvailable();
+        if (component == null) {
+            throw new IllegalStateException(componentName
+                    + " is required when novel-player.generation.pipeline-mode=staged");
+        }
+        return component;
     }
 
     /**

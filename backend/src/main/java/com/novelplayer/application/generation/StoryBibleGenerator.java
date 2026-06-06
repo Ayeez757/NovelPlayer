@@ -9,6 +9,7 @@ import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.project.NovelProject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
@@ -25,6 +26,8 @@ import java.util.regex.Pattern;
  * 人物/地点稳定 ID，避免后续场景规划和分场写作引用不可靠的编号。</p>
  */
 @Service
+@ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
+        matchIfMissing = true)
 public class StoryBibleGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(StoryBibleGenerator.class);
