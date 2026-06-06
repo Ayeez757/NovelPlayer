@@ -2,7 +2,7 @@
   <main class="workspace-shell">
     <header class="workspace-topbar">
       <section class="brand-banner">
-        <h1 style="color: #3b82f6;">NovelPlayer</h1>
+        <h1 style="color: #3b82f6;">NovelPlayer</h1><p>Play Your Novel.</p>
         <p>从小说原文到剧本草稿的改编工作台。</p>
       </section>
 
@@ -126,33 +126,91 @@
       >
         <section
           :ref="setSectionRef('text-input')"
-          class="content-card content-card--source"
+          :class="[
+            'content-card',
+            'content-card--source',
+            { 'content-card--upload': isUploadMode }
+          ]"
           data-section-id="text-input"
         >
           <div class="content-card__heading">
             <div>
               <p class="content-card__eyebrow">01</p>
-              <h2>文本输入</h2>
+              <h2>{{ sourceSectionTitle }}</h2>
             </div>
+            <span class="content-card__meta">{{ currentPageTypeLabel }}</span>
           </div>
 
           <p class="content-card__description">
-            这里保留默认样例文本，也支持你直接粘贴自己的小说原文。当前是工作台页，后续可以继续接上传入口和项目选择入口。
+            {{ sourceSectionDescription }}
           </p>
+
+          <div v-if="isUploadMode" class="source-mode-panel">
+            <label class="upload-dropzone" :class="{ 'is-ready': hasUploadedFile }">
+              <input
+                class="upload-dropzone__input"
+                type="file"
+                :accept="sourceFileAccept"
+                @change="handleSourceFileChange"
+              />
+
+              <div class="upload-dropzone__icon-wrap">
+                <el-icon class="upload-dropzone__icon"><UploadFilled /></el-icon>
+              </div>
+
+              <div class="upload-dropzone__body">
+                <h3>
+                  {{
+                    hasUploadedFile
+                      ? 'TXT 文件已导入，可继续检查并微调内容'
+                      : '拖拽 .txt 文件到这里，或点击选择文件'
+                  }}
+                </h3>
+                <p>
+                  建议上传至少 3 章纯文本内容。系统会读取 TXT 文件，并继续沿用当前的章节识别与 YAML 生成流程。
+                </p>
+              </div>
+
+              <div class="upload-dropzone__chips">
+                <span>仅支持 .txt</span>
+                <span>自动识别 UTF-8 / GB18030</span>
+                <span>继续沿用当前工作流</span>
+              </div>
+            </label>
+
+            <article v-if="hasUploadedFile" class="upload-file-card">
+              <div class="upload-file-card__meta">
+                <p class="upload-file-card__eyebrow">已导入文件</p>
+                <h3>{{ uploadedFileName }}</h3>
+                <p>
+                  {{ uploadedFileSizeLabel }} · {{ uploadedFileEncodingLabel }} ·
+                  {{ sourceCharacterCount.toLocaleString('zh-CN') }} 字
+                </p>
+              </div>
+
+              <div class="upload-file-card__actions">
+                <button type="button" class="text-link" @click="clearSourceText">清空文件</button>
+              </div>
+            </article>
+
+            <div v-else class="empty-state source-mode-empty">
+              文件上传完成后，这里会显示文件信息、编码识别结果和正文长度。
+            </div>
+          </div>
 
           <el-form label-position="top" class="editor-form">
             <el-form-item label="作品标题">
-              <el-input v-model="form.title" placeholder="输入作品标题" />
+              <el-input v-model="form.title" :placeholder="titlePlaceholder" />
             </el-form-item>
 
-            <el-form-item label="小说正文">
+            <el-form-item :label="sourceFieldLabel">
               <el-input
                 v-model="form.sourceText"
                 type="textarea"
                 resize="vertical"
-                :rows="20"
-                placeholder="至少粘贴 3 章内容，支持 第一章 / 第1章 / Chapter 1 等标题格式"
-                class="novel-textarea"
+                :rows="isUploadMode ? 16 : 20"
+                :placeholder="sourceFieldPlaceholder"
+                :class="['novel-textarea', { 'novel-textarea--upload': isUploadMode }]"
               />
             </el-form-item>
           </el-form>
@@ -160,8 +218,17 @@
           <div class="source-toolbar">
             <span>当前正文长度：{{ sourceCharacterCount.toLocaleString('zh-CN') }} 字</span>
             <div class="source-toolbar__actions">
-              <button type="button" class="text-link" @click="restoreSampleText">恢复样例</button>
-              <button type="button" class="text-link" @click="clearSourceText">清空正文</button>
+              <button
+                v-if="!isUploadMode"
+                type="button"
+                class="text-link"
+                @click="restoreSampleText"
+              >
+                恢复样例
+              </button>
+              <button type="button" class="text-link" @click="clearSourceText">
+                {{ clearSourceActionLabel }}
+              </button>
             </div>
           </div>
         </section>
@@ -182,7 +249,7 @@
           </div>
 
           <p class="content-card__description">
-            点击后会根据章节标题规则先切分原文。识别完成后，你可以在这个板块里直接选择本次准备参与生成的章节。
+            点击后会根据章节标题规则先切分原文。识别完成后，这里会展示当前参与生成的章节范围。
           </p>
 
           <div class="action-row">
@@ -203,7 +270,7 @@
                   <span>/ {{ project.chapters.length }} 章已选</span>
                 </div>
 
-                <div class="chapter-selection-actions">
+                <div v-if="supportsChapterSelectionSubmission" class="chapter-selection-actions">
                   <button type="button" class="text-link" @click="selectAllChapters">全选</button>
                   <button type="button" class="text-link" @click="clearChapterSelection">清空</button>
                 </div>
@@ -212,20 +279,16 @@
               <ChapterList
                 :chapters="project.chapters"
                 :selected-indexes="selectedChapterIndexes"
-                selectable
+                :selectable="supportsChapterSelectionSubmission"
                 @toggle="toggleChapterSelection"
               />
 
-              <p
-                v-if="hasCustomChapterSelection && !supportsChapterSelectionSubmission"
-                class="chapter-selection-note"
-              >
-                当前工作台已经支持章节勾选，但这份仓库里还没有看到后端章节选择入参。
-                现在如果要按子集章节生成，需要等同事接口合入后再补这一层请求映射。
+              <p class="chapter-selection-note">
+                {{ chapterSelectionHint }}
               </p>
             </template>
 
-            <div v-else class="empty-state">章节识别完成后，这里会显示每章摘要与选择状态。</div>
+            <div v-else class="empty-state">章节识别完成后，这里会显示每章摘要与参与生成范围。</div>
           </article>
         </section>
 
@@ -239,7 +302,7 @@
               <p class="content-card__eyebrow">03</p>
               <h2>确认提交</h2>
             </div>
-            <span class="content-card__meta">{{ generating ? '生成中' : '等待生成' }}</span>
+            <span class="content-card__meta">{{ submitStatusLabel }}</span>
           </div>
 
           <div class="settings-grid">
@@ -280,16 +343,41 @@
               </ul>
 
               <div class="submit-summary__actions">
-                <el-button
-                  type="success"
-                  size="large"
-                  class="generate-script-button"
-                  :disabled="!project || !hasSelectedChapters"
-                  :loading="generating"
-                  @click="generate"
+                <div
+                  class="submit-summary__action-group"
+                  :class="{ 'is-single': !canPauseGeneration && !canResumeGeneration }"
                 >
-                  生成剧本
-                </el-button>
+                  <el-button
+                    type="success"
+                    size="large"
+                    class="generate-script-button"
+                    :disabled="!project || !hasSelectedChapters || generating"
+                    :loading="generateButtonLoading"
+                    @click="generate"
+                  >
+                    生成剧本
+                  </el-button>
+
+                  <el-button
+                    v-if="canPauseGeneration"
+                    type="success"
+                    size="large"
+                    class="generate-script-button"
+                    @click="pauseGenerationPolling"
+                  >
+                    暂停生成
+                  </el-button>
+
+                  <el-button
+                    v-else-if="canResumeGeneration"
+                    type="success"
+                    size="large"
+                    class="generate-script-button"
+                    @click="resumeGenerationPolling"
+                  >
+                    继续生成
+                  </el-button>
+                </div>
               </div>
             </div>
           </div>
@@ -387,13 +475,23 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { DArrowLeft, DArrowRight, EditPen, UploadFilled, View } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import {
+  DArrowLeft,
+  DArrowRight,
+  EditPen,
+  UploadFilled,
+  View
+} from '@element-plus/icons-vue'
 import ChapterList from '../features/workspace/components/ChapterList.vue'
 import GenerationProgress from '../features/workspace/components/GenerationProgress.vue'
 import ScriptYamlEditor from '../features/workspace/components/ScriptYamlEditor.vue'
 import { useWorkspacePage } from '../features/workspace/composables/useWorkspacePage'
 
 const {
+  canPauseGeneration,
+  canResumeGeneration,
+  chapterSelectionHint,
   clearChapterSelection,
   clearSourceText,
   contentSections,
@@ -407,18 +505,23 @@ const {
   form,
   formatIndex,
   generate,
+  generateButtonLoading,
   generating,
   generationJobId,
   generationLogs,
   generationMessage,
   generationStage,
-  hasCustomChapterSelection,
+  hasUploadedFile,
   hasSelectedChapters,
   isCompactLayout,
+  isUploadMode,
   leftSidebarCollapsed,
+  loadSourceFile,
   options,
+  pauseGenerationPolling,
   project,
   restoreSampleText,
+  resumeGenerationPolling,
   script,
   scrollToSection,
   selectAllChapters,
@@ -428,10 +531,15 @@ const {
   selectedChapterSummary,
   setSectionRef,
   sourceCharacterCount,
+  sourceFileAccept,
   startLeftSidebarResize,
+  submitStatusLabel,
   supportsChapterSelectionSubmission,
   toggleChapterSelection,
   toggleLeftSidebar,
+  uploadedFileEncodingLabel,
+  uploadedFileName,
+  uploadedFileSizeLabel,
   viewMode,
   viewModeOptions,
   workspaceBodyRef,
@@ -454,4 +562,39 @@ const toneLabels: Record<string, string> = {
 
 const formatLabel = computed(() => formatLabels[options.format] ?? options.format)
 const toneLabel = computed(() => toneLabels[options.tone] ?? options.tone)
+const sourceSectionTitle = computed(() => (isUploadMode.value ? '上传文件' : '文本输入'))
+const sourceSectionDescription = computed(() => {
+  return isUploadMode.value
+    ? '导入 TXT 小说原文，并沿当前工作台流程继续完成章节识别、剧本生成和 YAML 编辑。'
+    : '这里保留默认样例文本，也支持你直接粘贴自己的小说原文。识别章节后，就能继续沿当前工作台流程生成剧本草稿。'
+})
+const titlePlaceholder = computed(() => {
+  return isUploadMode.value ? '导入文件后可自动带入，也支持手动修改' : '输入作品标题'
+})
+const sourceFieldLabel = computed(() => (isUploadMode.value ? '导入预览' : '小说正文'))
+const sourceFieldPlaceholder = computed(() => {
+  return isUploadMode.value
+    ? '上传后的 txt 内容会显示在这里，你也可以继续补充或微调。'
+    : '至少粘贴 3 章内容，支持 第1章 / 第一章 / Chapter 1 等标题格式'
+})
+const clearSourceActionLabel = computed(() => (isUploadMode.value ? '清空文件内容' : '清空正文'))
+
+async function handleSourceFileChange(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+
+  if (!file) {
+    return
+  }
+
+  try {
+    await loadSourceFile(file)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '文件读取失败')
+  } finally {
+    if (input) {
+      input.value = ''
+    }
+  }
+}
 </script>

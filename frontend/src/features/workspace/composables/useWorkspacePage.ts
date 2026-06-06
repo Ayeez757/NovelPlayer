@@ -15,7 +15,7 @@ import type {
   ScriptDocumentResponse
 } from '../../../api/types'
 import {
-  contentSections,
+  contentSections as baseContentSections,
   createDefaultForm,
   createDefaultGenerationOptions,
   pageTypeLabels,
@@ -29,6 +29,9 @@ import {
 
 const GENERATION_POLL_INTERVAL_MS = 1600
 const MAX_GENERATION_POLL_FAILURES = 3
+const SUPPORTED_TEXT_FILE_EXTENSIONS = ['txt']
+const SOURCE_FILE_ACCEPT = '.txt,text/plain'
+const DEFAULT_TITLE = '未命名作品'
 
 export function useWorkspacePage() {
   const form = reactive(createDefaultForm())
@@ -42,8 +45,12 @@ export function useWorkspacePage() {
   const generationStage = ref('')
   const generationMessage = ref('')
   const generationJobId = ref<number | null>(null)
+  const generationPollPaused = ref(false)
   const generationLogs = ref<GenerationLogItem[]>([])
   const selectedChapterIndexes = ref<number[]>([])
+  const uploadedFileName = ref('')
+  const uploadedFileEncoding = ref('')
+  const uploadedFileSize = ref(0)
 
   const currentSection = ref<SectionId>('text-input')
   const currentPageType = ref<PageType>('instant-write')
@@ -63,16 +70,44 @@ export function useWorkspacePage() {
 
   const supportsChapterSelectionSubmission = false
 
+  const isUploadMode = computed(() => currentPageType.value === 'upload-convert')
+  const hasUploadedFile = computed(() => uploadedFileName.value.length > 0)
+  const contentSections = computed(() => {
+    return baseContentSections.map((item) => {
+      if (item.id !== 'text-input') {
+        return item
+      }
+
+      return isUploadMode.value
+        ? {
+            ...item,
+            label: '上传文件',
+            hint: '导入 txt 原文'
+          }
+        : item
+    })
+  })
   const currentSectionMeta = computed(
-    () => contentSections.find((item) => item.id === currentSection.value) ?? contentSections[0]
+    () => contentSections.value.find((item) => item.id === currentSection.value) ?? contentSections.value[0]
   )
   const currentPageTypeLabel = computed(() => pageTypeLabels[currentPageType.value])
   const sourceCharacterCount = computed(() => form.sourceText.replace(/\s+/g, '').length)
   const totalChapterCount = computed(() => project.value?.chapters.length ?? 0)
-  const selectedChapterCount = computed(() => selectedChapterIndexes.value.length)
+  const selectedChapterCount = computed(() => {
+    if (!project.value) {
+      return selectedChapterIndexes.value.length
+    }
+
+    if (!supportsChapterSelectionSubmission) {
+      return totalChapterCount.value
+    }
+
+    return selectedChapterIndexes.value.length
+  })
   const hasSelectedChapters = computed(() => selectedChapterCount.value > 0)
   const hasCustomChapterSelection = computed(() => {
     return (
+      supportsChapterSelectionSubmission &&
       project.value !== null &&
       selectedChapterCount.value > 0 &&
       selectedChapterCount.value < totalChapterCount.value
@@ -84,6 +119,41 @@ export function useWorkspacePage() {
     }
 
     return `${selectedChapterCount.value}/${totalChapterCount.value} 章已选`
+  })
+  const uploadedFileSizeLabel = computed(() => formatFileSize(uploadedFileSize.value))
+  const uploadedFileEncodingLabel = computed(() => {
+    return uploadedFileEncoding.value ? uploadedFileEncoding.value.toUpperCase() : '未识别'
+  })
+  const canPauseGeneration = computed(
+    () => generating.value && generationJobId.value !== null && !generationPollPaused.value
+  )
+  const canResumeGeneration = computed(
+    () => generating.value && generationJobId.value !== null && generationPollPaused.value
+  )
+  const generateButtonLoading = computed(
+    () => generating.value && generationJobId.value !== null && !generationPollPaused.value
+  )
+  const submitStatusLabel = computed(() => {
+    if (!generating.value) {
+      return '等待生成'
+    }
+
+    return generationPollPaused.value ? '生成中（已暂停轮询）' : '生成中'
+  })
+  const chapterSelectionHint = computed(() => {
+    if (!project.value) {
+      return '章节识别完成后，这里会展示每章摘要与参与生成范围。'
+    }
+
+    if (!supportsChapterSelectionSubmission) {
+      return '当前后端还没有章节选择入参，本次会默认按全部章节生成。'
+    }
+
+    if (hasCustomChapterSelection.value) {
+      return '当前将按已勾选章节参与生成。'
+    }
+
+    return '当前将按全部已识别章节参与生成。'
   })
   const isCompactLayout = computed(() => viewportWidth.value < 1100)
 
@@ -153,7 +223,7 @@ export function useWorkspacePage() {
       }
     )
 
-    contentSections.forEach((item) => {
+    contentSections.value.forEach((item) => {
       const element = observedSections.get(item.id)
       if (element) {
         sectionObserver?.observe(element)
@@ -173,20 +243,56 @@ export function useWorkspacePage() {
   }
 
   function restoreSampleText() {
+    clearUploadedFileMeta()
+    resetWorkspaceFlow()
     form.sourceText = sampleText()
     ElMessage.success('已恢复默认样例文本')
   }
 
   function clearSourceText() {
+    clearUploadedFileMeta()
+    resetWorkspaceFlow()
     form.sourceText = ''
+  }
+
+  async function loadSourceFile(file: File) {
+    validateSourceFile(file)
+
+    const nextTitle = stripFileExtension(file.name)
+    const previousImportedTitle = stripFileExtension(uploadedFileName.value)
+    const buffer = await file.arrayBuffer()
+    const { text, encoding } = decodeTextBuffer(buffer)
+    const normalizedText = normalizeSourceText(text)
+
+    if (!normalizedText.trim()) {
+      throw new Error('读取到的文本内容为空，请检查文件内容后重试。')
+    }
+
+    resetWorkspaceFlow()
+    form.sourceText = normalizedText
+
+    if (
+      !form.title.trim() ||
+      form.title === DEFAULT_TITLE ||
+      (previousImportedTitle && form.title === previousImportedTitle)
+    ) {
+      form.title = nextTitle || DEFAULT_TITLE
+    }
+
+    uploadedFileName.value = file.name
+    uploadedFileEncoding.value = encoding
+    uploadedFileSize.value = file.size
+
+    appendLog(
+      '文件导入',
+      `已读取《${file.name}》，共 ${sourceCharacterCount.value.toLocaleString('zh-CN')} 字。`,
+      'success'
+    )
+    ElMessage.success(`已导入 ${file.name}，后续流程将按文本模式继续。`)
   }
 
   function selectPageType(type: PageType) {
     currentPageType.value = type
-
-    if (type === 'upload-convert') {
-      ElMessage.info(`${pageTypeLabels[type]} 入口已经预留，下一步可以继续接上传流程。`)
-    }
   }
 
   function toggleLeftSidebar() {
@@ -198,9 +304,20 @@ export function useWorkspacePage() {
   }
 
   async function create() {
+    if (!form.title.trim()) {
+      ElMessage.warning('请输入作品标题')
+      return
+    }
+
+    if (!form.sourceText.trim()) {
+      ElMessage.warning(isUploadMode.value ? '请先上传 txt 文件或补充文本内容' : '请先输入小说正文')
+      return
+    }
+
     stopGenerationPolling()
     creating.value = true
     generating.value = false
+    generationPollPaused.value = false
     generationJobId.value = null
     generationStage.value = ''
     generationMessage.value = ''
@@ -251,6 +368,7 @@ export function useWorkspacePage() {
     generationStage.value = 'created'
     generationMessage.value = '正在创建后台生成任务'
     generationJobId.value = null
+    generationPollPaused.value = false
     generationLogs.value = []
     generationPollFailureCount = 0
     lastLoggedJobProgressKey = ''
@@ -302,6 +420,28 @@ export function useWorkspacePage() {
 
   function clearChapterSelection() {
     selectedChapterIndexes.value = []
+  }
+
+  function pauseGenerationPolling() {
+    if (!canPauseGeneration.value) {
+      return
+    }
+
+    stopGenerationPolling()
+    generationPollPaused.value = true
+    generationMessage.value = '生成仍在后台继续，当前已暂停进度轮询'
+    appendLog('轮询已暂停', '已暂停前端进度轮询，后台任务仍在继续。')
+  }
+
+  function resumeGenerationPolling() {
+    if (!canResumeGeneration.value || generationJobId.value === null) {
+      return
+    }
+
+    generationPollPaused.value = false
+    generationMessage.value = '正在恢复进度轮询'
+    appendLog('轮询已恢复', `重新连接任务 #${generationJobId.value} 的执行进度。`)
+    void pollGenerationJob(generationJobId.value)
   }
 
   function startLeftSidebarResize(event: PointerEvent) {
@@ -377,6 +517,10 @@ export function useWorkspacePage() {
         return
       }
 
+      if (generationPollPaused.value) {
+        return
+      }
+
       scheduleGenerationPoll(jobId)
     } catch (error) {
       if (generationJobId.value !== jobId) {
@@ -422,6 +566,7 @@ export function useWorkspacePage() {
   async function completeGenerationJob(job: GenerationJobResponse) {
     stopGenerationPolling()
     generationStage.value = 'completed'
+    generationPollPaused.value = false
     generationMessage.value = '剧本生成完成，正在读取最新 YAML'
 
     try {
@@ -450,10 +595,34 @@ export function useWorkspacePage() {
   function failGenerationJob(message: string) {
     stopGenerationPolling()
     generationStage.value = 'failed'
+    generationPollPaused.value = false
     generationMessage.value = message
     generating.value = false
     appendLog('生成失败', message, 'error')
     ElMessage.error(message)
+  }
+
+  function resetWorkspaceFlow() {
+    stopGenerationPolling()
+    creating.value = false
+    generating.value = false
+    project.value = null
+    script.value = null
+    yamlDraft.value = ''
+    generationStage.value = ''
+    generationMessage.value = ''
+    generationJobId.value = null
+    generationPollPaused.value = false
+    generationLogs.value = []
+    selectedChapterIndexes.value = []
+    generationPollFailureCount = 0
+    lastLoggedJobProgressKey = ''
+  }
+
+  function clearUploadedFileMeta() {
+    uploadedFileName.value = ''
+    uploadedFileEncoding.value = ''
+    uploadedFileSize.value = 0
   }
 
   function syncChapterSelection(indexes: number[]) {
@@ -474,6 +643,9 @@ export function useWorkspacePage() {
   }
 
   return {
+    canPauseGeneration,
+    canResumeGeneration,
+    chapterSelectionHint,
     clearChapterSelection,
     clearSourceText,
     contentSections,
@@ -487,6 +659,7 @@ export function useWorkspacePage() {
     form,
     formatIndex,
     generate,
+    generateButtonLoading,
     generating,
     generationJobId,
     generationLogs,
@@ -494,11 +667,16 @@ export function useWorkspacePage() {
     generationStage,
     hasCustomChapterSelection,
     hasSelectedChapters,
+    hasUploadedFile,
     isCompactLayout,
+    isUploadMode,
     leftSidebarCollapsed,
+    loadSourceFile,
     options,
+    pauseGenerationPolling,
     project,
     restoreSampleText,
+    resumeGenerationPolling,
     script,
     scrollToSection,
     selectAllChapters,
@@ -508,10 +686,15 @@ export function useWorkspacePage() {
     selectedChapterSummary,
     setSectionRef,
     sourceCharacterCount,
+    sourceFileAccept: SOURCE_FILE_ACCEPT,
     startLeftSidebarResize,
+    submitStatusLabel,
     supportsChapterSelectionSubmission,
     toggleChapterSelection,
     toggleLeftSidebar,
+    uploadedFileEncodingLabel,
+    uploadedFileName,
+    uploadedFileSizeLabel,
     viewMode,
     viewModeOptions,
     workspaceBodyRef,
@@ -536,6 +719,62 @@ function formatTime() {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '发生了未知错误'
+}
+
+function validateSourceFile(file: File) {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+
+  if (!SUPPORTED_TEXT_FILE_EXTENSIONS.includes(extension)) {
+    throw new Error('当前仅支持上传 .txt 文件。')
+  }
+
+  if (file.size <= 0) {
+    throw new Error('上传文件为空，请重新选择有效的 txt 文件。')
+  }
+}
+
+function decodeTextBuffer(buffer: ArrayBuffer) {
+  const encodings = ['utf-8', 'gb18030']
+
+  for (const encoding of encodings) {
+    try {
+      const text = new TextDecoder(encoding, { fatal: true }).decode(buffer)
+      return { text, encoding }
+    } catch {
+      continue
+    }
+  }
+
+  return {
+    text: new TextDecoder('utf-8').decode(buffer),
+    encoding: 'utf-8'
+  }
+}
+
+function normalizeSourceText(value: string) {
+  return value.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+function stripFileExtension(fileName: string) {
+  return fileName.replace(/\.[^.]+$/, '')
+}
+
+function formatFileSize(value: number) {
+  if (value <= 0) {
+    return '0 B'
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = value
+  let unitIndex = 0
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+
+  const digits = unitIndex === 0 ? 0 : size >= 10 ? 1 : 2
+  return `${size.toFixed(digits)} ${units[unitIndex]}`
 }
 
 const generationStageLabels: Record<string, string> = {

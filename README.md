@@ -164,7 +164,7 @@ copy .env.example .env
 
 ```env
 SERVER_PORT=8080
-FRONTEND_HOST_PORT=8081
+FRONTEND_HOST_PORT=8080
 SPRING_PROFILES_ACTIVE=test
 NOVEL_PLAYER_MINIMUM_CHAPTERS=3
 NOVEL_PLAYER_MOCK_AI=true
@@ -194,7 +194,7 @@ docker compose up --build
 浏览器打开：
 
 ```text
-http://localhost:8081
+http://localhost:8080
 ```
 
 Docker Compose 会启动三个服务：

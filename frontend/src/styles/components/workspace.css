@@ -292,6 +292,18 @@
   margin: 0 0 18px;
 }
 
+.content-card--upload {
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 30%),
+    linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+}
+
+.source-mode-panel {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
 .editor-form :deep(.el-form-item) {
   margin-bottom: 16px;
 }
@@ -313,6 +325,142 @@
   min-height: 420px;
   resize: vertical;
   line-height: 1.7;
+}
+
+.novel-textarea--upload :deep(.el-textarea__inner) {
+  min-height: 320px;
+}
+
+.upload-dropzone {
+  position: relative;
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  margin-bottom: 18px;
+  border: 1px dashed #9bc2ff;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(239, 246, 255, 0.92), rgba(255, 255, 255, 0.98)),
+    var(--surface-base);
+  box-shadow: 0 18px 38px rgba(37, 99, 235, 0.08);
+  cursor: pointer;
+  transition:
+    transform 0.28s var(--float-ease),
+    box-shadow 0.28s var(--float-ease),
+    border-color 0.28s var(--float-ease),
+    background-color 0.28s var(--float-ease);
+}
+
+.upload-dropzone:hover,
+.upload-dropzone:focus-within,
+.upload-dropzone.is-dragging {
+  transform: translateY(-4px);
+  border-color: #60a5fa;
+  box-shadow: 0 24px 46px rgba(37, 99, 235, 0.14);
+}
+
+.upload-dropzone.is-ready {
+  border-style: solid;
+  border-color: #7dd3fc;
+  background:
+    linear-gradient(135deg, rgba(236, 254, 255, 0.95), rgba(255, 255, 255, 1)),
+    var(--surface-base);
+}
+
+.upload-dropzone__input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload-dropzone__icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
+  color: #ffffff;
+  box-shadow: 0 18px 32px rgba(37, 99, 235, 0.22);
+}
+
+.upload-dropzone__icon {
+  font-size: 28px;
+}
+
+.upload-dropzone__body h3,
+.upload-file-card__meta h3 {
+  margin: 0;
+  color: #102033;
+}
+
+.upload-dropzone__body p,
+.upload-file-card__meta p {
+  margin: 8px 0 0;
+  color: #5b6b7d;
+  line-height: 1.7;
+}
+
+.upload-dropzone__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.upload-dropzone__chips span,
+.upload-file-card__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.upload-file-card {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+  border: 1px solid #d6e8ff;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f9fcff 0%, #f2f8ff 100%);
+  box-shadow: 0 14px 30px rgba(59, 130, 246, 0.08);
+}
+
+.upload-file-card__meta {
+  min-width: 0;
+}
+
+.upload-file-card__eyebrow {
+  margin: 0 0 10px;
+}
+
+.upload-file-card__meta h3 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-file-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.source-mode-empty {
+  min-height: 96px;
+  padding: 18px;
+  text-align: center;
 }
 
 .source-toolbar,
@@ -371,6 +519,17 @@
   margin-top: 18px;
 }
 
+.submit-summary__action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: 100%;
+}
+
+.submit-summary__action-group.is-single {
+  justify-content: flex-start;
+}
+
 .generate-script-button {
   min-height: 52px;
   padding-inline: 28px;
@@ -378,6 +537,11 @@
   font-size: 16px;
   font-weight: 700;
   box-shadow: 0 14px 28px rgba(34, 197, 94, 0.22);
+}
+
+.submit-summary__action-group .generate-script-button {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .result-panel,
@@ -689,5 +853,15 @@
   body::before,
   body::after {
     display: none;
+  }
+
+  .upload-file-card {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 720px) {
+  .upload-dropzone {
+    padding: 20px 18px;
   }
 }
