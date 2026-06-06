@@ -5,14 +5,13 @@
     resize="none"
     spellcheck="false"
     :rows="34"
-    placeholder="生成后会在这里显示 YAML，可直接编辑。"
+    placeholder="生成后的 YAML 会显示在这里，也可以继续手动编辑。"
     class="yaml-editor"
-    @input="$emit('update:modelValue', $event)"
+    @update:model-value="$emit('update:modelValue', $event)"
   />
 </template>
 
 <script setup lang="ts">
-// 通过双向绑定暴露 YAML 文本，后续可替换为专业代码编辑器。
 defineProps<{
   modelValue: string
 }>()
