@@ -5,6 +5,7 @@ import com.novelplayer.application.generation.model.ChapterDigest;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.project.NovelChapter;
 import com.novelplayer.domain.project.NovelProject;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,8 @@ import java.util.Optional;
  * {@link ChapterDigest}，并通过 {@link GenerationStageStore} 复用同一输入哈希下已经成功的结果。</p>
  */
 @Service
+@ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
+        matchIfMissing = true)
 public class ChapterDigestGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ChapterDigestGenerator.class);

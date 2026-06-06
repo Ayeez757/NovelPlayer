@@ -52,6 +52,8 @@ management:
 novel-player:
   generation:
     minimum-chapters: ${NOVEL_PLAYER_MINIMUM_CHAPTERS:3}
+    # 生成管线模式：staged 为多阶段生成，legacy 为旧的一次性生成链路。
+    pipeline-mode: ${NOVEL_PLAYER_GENERATION_PIPELINE_MODE:staged}
     # 默认使用模拟生成，保证没有模型密钥也能启动。
     # 接入 DeepSeek 时改成 false。
     mock-ai: ${NOVEL_PLAYER_MOCK_AI:true}

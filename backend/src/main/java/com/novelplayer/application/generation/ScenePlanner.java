@@ -11,6 +11,7 @@ import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.project.NovelProject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
@@ -26,6 +27,8 @@ import java.util.Set;
  * 它会校验场景对章节、人物和地点的引用，避免后续分场草稿阶段拿到不可落地的结构蓝图。</p>
  */
 @Service
+@ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
+        matchIfMissing = true)
 public class ScenePlanner {
 
     private static final Logger log = LoggerFactory.getLogger(ScenePlanner.class);

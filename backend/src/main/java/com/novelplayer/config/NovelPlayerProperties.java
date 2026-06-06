@@ -44,6 +44,11 @@ public class NovelPlayerProperties {
         private boolean mockAi = true;
 
         /**
+         * 生成管线模式。默认启用多阶段生成，必要时可切回旧的一次性生成链路。
+         */
+        private PipelineMode pipelineMode = PipelineMode.STAGED;
+
+        /**
          * 读取生成前要求的最小章节数。
          *
          * @return 最小章节数。
@@ -77,6 +82,39 @@ public class NovelPlayerProperties {
          */
         public void setMockAi(boolean mockAi) {
             this.mockAi = mockAi;
+        }
+
+        /**
+         * 读取当前生成管线模式。
+         *
+         * @return 生成管线模式。
+         */
+        public PipelineMode getPipelineMode() {
+            return pipelineMode;
+        }
+
+        /**
+         * 设置生成管线模式。
+         *
+         * @param pipelineMode 生成管线模式。
+         */
+        public void setPipelineMode(PipelineMode pipelineMode) {
+            this.pipelineMode = pipelineMode;
+        }
+
+        /**
+         * 生成管线模式枚举。
+         */
+        public enum PipelineMode {
+            /**
+             * 旧的一次性剧本生成链路。
+             */
+            LEGACY,
+
+            /**
+             * 新的章节摘要、故事圣经、场景规划、分场草稿和最终组装链路。
+             */
+            STAGED
         }
     }
 }

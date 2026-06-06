@@ -11,6 +11,7 @@ import com.novelplayer.domain.project.NovelProject;
 import com.novelplayer.domain.script.ScriptDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -28,6 +29,8 @@ import java.util.Set;
  * {@link ScriptDocument}，后续仍然复用现有的结构校验、YAML 导出、JSON 映射和文档落库链路。</p>
  */
 @Service
+@ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
+        matchIfMissing = true)
 public class ScriptAssembler {
 
     private static final Logger log = LoggerFactory.getLogger(ScriptAssembler.class);
