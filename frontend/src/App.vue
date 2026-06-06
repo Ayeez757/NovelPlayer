@@ -69,6 +69,17 @@
           <el-form-item label="旁白保留">
             <el-slider v-model="options.narrationRetention" :min="0" :max="100" />
           </el-form-item>
+          <el-form-item label="补充改编要求">
+            <el-input
+              v-model="options.additionalInstructions"
+              type="textarea"
+              resize="none"
+              :rows="6"
+              :maxlength="4000"
+              show-word-limit
+              placeholder="例如：强化主角主动性，减少旁白，保留结尾反转"
+            />
+          </el-form-item>
           <el-button
             type="success"
             :disabled="!project"
@@ -107,12 +118,13 @@ const form = reactive({
   sourceText: sampleText()
 })
 
-// 这些字段对应后端生成请求，并映射到模型提示词中的改编约束。
+// 这些字段对应后端生成请求，并映射到模型提示词中的改编约束；补充要求只影响本次生成。
 const options = reactive<GenerationRequest>({
   format: 'web_drama',
   tone: 'suspense',
   dialogueDensity: 60,
-  narrationRetention: 30
+  narrationRetention: 30,
+  additionalInstructions: ''
 })
 
 const creating = ref(false)

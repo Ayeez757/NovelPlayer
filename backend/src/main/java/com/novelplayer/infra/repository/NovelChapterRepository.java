@@ -12,6 +12,9 @@ public interface NovelChapterRepository extends JpaRepository<NovelChapter, Long
 
     /**
      * 生成剧本时必须按原始章节顺序读取。
+     *
+     * @param projectId 项目主键。
+     * @return 按章节顺序排列的章节列表。
      */
     List<NovelChapter> findByProjectIdOrderByChapterIndex(Long projectId);
 }

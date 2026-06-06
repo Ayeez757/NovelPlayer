@@ -12,5 +12,15 @@ import java.util.List;
  */
 public interface ScriptAiClient {
 
+    /**
+     * 根据已拆分并持久化的章节生成结构化剧本文档。
+     *
+     * 实现类只负责产出 Java 可解析的结构，引用关系和 YAML 格式由应用层统一处理。
+     *
+     * @param project 小说改编项目。
+     * @param chapters 按顺序持久化的小说章节。
+     * @param options 改编控制选项。
+     * @return 结构化剧本文档。
+     */
     ScriptDocument generateScript(NovelProject project, List<NovelChapter> chapters, GenerationOptions options);
 }
