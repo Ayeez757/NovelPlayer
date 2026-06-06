@@ -10,6 +10,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class GenerationOptionsTest {
 
+    /**
+     * 验证生成选项会去除首尾空白、统一换行并过滤控制字符。
+     */
     @Test
     void normalizesAdditionalInstructions() {
         GenerationOptions options = new GenerationOptions(" web_drama ", " suspense ", 60, 30,
@@ -21,6 +24,9 @@ class GenerationOptionsTest {
         assertThat(options.hasAdditionalInstructions()).isTrue();
     }
 
+    /**
+     * 验证空白补充要求会被视为未填写。
+     */
     @Test
     void treatsBlankAdditionalInstructionsAsAbsent() {
         GenerationOptions options = new GenerationOptions("web_drama", "suspense", 60, 30, " \n\t ");
@@ -29,6 +35,9 @@ class GenerationOptionsTest {
         assertThat(options.hasAdditionalInstructions()).isFalse();
     }
 
+    /**
+     * 验证比例参数和补充要求长度会被应用层兜底校验。
+     */
     @Test
     void rejectsInvalidRangesAndOverlongInstructions() {
         String tooLong = "a".repeat(GenerationOptions.MAX_ADDITIONAL_INSTRUCTIONS_LENGTH + 1);

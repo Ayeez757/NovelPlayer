@@ -67,6 +67,12 @@ public class MockScriptAiClient implements ScriptAiClient {
         );
     }
 
+    /**
+     * 生成模拟剧本的修订备注。
+     *
+     * @param options 改编控制选项。
+     * @return 用于提示当前结果来源和补充要求传递情况的备注列表。
+     */
     private List<String> revisionNotes(GenerationOptions options) {
         List<String> notes = new ArrayList<>();
         notes.add("当前为本地模拟初稿，用于无模型密钥情况下验证产品闭环。");

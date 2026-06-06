@@ -9,6 +9,7 @@ import com.novelplayer.application.generation.model.DraftSceneBlock;
 import com.novelplayer.application.generation.model.LocationMention;
 import com.novelplayer.application.generation.model.PlannedScene;
 import com.novelplayer.application.generation.model.SceneDraft;
+import com.novelplayer.application.generation.model.SceneDraftContext;
 import com.novelplayer.application.generation.model.ScenePlan;
 import com.novelplayer.application.generation.model.StoryBible;
 import com.novelplayer.domain.project.NovelChapter;
@@ -146,23 +147,19 @@ public class MockStagedScriptAiClient implements StagedScriptAiClient {
      * 根据单个场景大纲生成模拟分场草稿。
      *
      * @param project 小说改编项目。
-     * @param plannedScene 待生成的场景大纲。
-     * @param sourceChapters 场景关联的原文章节。
-     * @param storyBible 全局故事圣经。
+     * @param context 分场写作最小上下文。
      * @param options 生成参数。
      * @return 稳定的分场草稿中间模型。
      */
     @Override
-    public SceneDraft generateSceneDraft(NovelProject project, PlannedScene plannedScene,
-                                         List<NovelChapter> sourceChapters, StoryBible storyBible,
-                                         GenerationOptions options) {
+    public SceneDraft generateSceneDraft(NovelProject project, SceneDraftContext context, GenerationOptions options) {
         Objects.requireNonNull(project, "project must not be null");
-        Objects.requireNonNull(plannedScene, "plannedScene must not be null");
-        Objects.requireNonNull(storyBible, "storyBible must not be null");
+        Objects.requireNonNull(context, "context must not be null");
         Objects.requireNonNull(options, "options must not be null");
-        List<NovelChapter> chapters = requireNonEmpty(sourceChapters, "sourceChapters");
-        String firstCharacterId = plannedScene.characters().getFirst();
-        String secondCharacterId = plannedScene.characters().size() > 1 ? plannedScene.characters().get(1) : firstCharacterId;
+        PlannedScene plannedScene = context.plannedScene();
+        List<NovelChapter> chapters = requireNonEmpty(context.sourceChapters(), "sourceChapters");
+        String firstCharacterId = context.characters().getFirst().id();
+        String secondCharacterId = context.characters().size() > 1 ? context.characters().get(1).id() : firstCharacterId;
         log.info("生成模拟分场草稿 projectId={} sceneId={} sourceChapterCount={} blockSeedLength={}",
                 project.getId(), plannedScene.id(), chapters.size(), chapters.getFirst().getContent().length());
 
@@ -187,6 +184,13 @@ public class MockStagedScriptAiClient implements StagedScriptAiClient {
         );
     }
 
+    /**
+     * 将原文片段压缩成固定长度的模拟摘要。
+     *
+     * @param value 原始文本。
+     * @param maxLength 最大摘要长度。
+     * @return 摘要文本。
+     */
     private static String summarize(String value, int maxLength) {
         if (value == null || value.isBlank()) {
             return "当前章节缺少可用正文，模拟摘要保留为空白输入提示。";
@@ -198,6 +202,14 @@ public class MockStagedScriptAiClient implements StagedScriptAiClient {
         return normalized.substring(0, maxLength) + "...";
     }
 
+    /**
+     * 校验模拟生成依赖的列表输入不能为空，并复制为不可变列表。
+     *
+     * @param values 原始列表。
+     * @param name 参数名称。
+     * @return 不可变列表。
+     * @param <T> 列表元素类型。
+     */
     private static <T> List<T> requireNonEmpty(List<T> values, String name) {
         if (values == null || values.isEmpty()) {
             throw new IllegalArgumentException(name + " must not be empty");

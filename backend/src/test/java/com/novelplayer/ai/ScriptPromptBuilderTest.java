@@ -14,6 +14,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ScriptPromptBuilderTest {
 
+    /**
+     * 验证用户补充要求只进入 user prompt，不污染 system prompt。
+     */
     @Test
     void keepsUserInstructionsOutOfSystemPrompt() {
         ScriptPromptBuilder builder = new ScriptPromptBuilder("系统协议", "必须返回 JSON");
@@ -35,6 +38,9 @@ class ScriptPromptBuilderTest {
                 .contains("她发现一封信。");
     }
 
+    /**
+     * 验证没有补充要求时不会生成额外的提示词段落。
+     */
     @Test
     void omitsAdditionalInstructionsSectionWhenAbsent() {
         ScriptPromptBuilder builder = new ScriptPromptBuilder("系统协议", "必须返回 JSON");

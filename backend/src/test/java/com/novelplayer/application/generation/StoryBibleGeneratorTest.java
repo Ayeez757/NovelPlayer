@@ -45,12 +45,18 @@ class StoryBibleGeneratorTest {
     private GenerationStageStore stageStore;
     private StoryBibleGenerator generator;
 
+    /**
+     * 为每个用例创建阶段存储和故事圣经生成器。
+     */
     @BeforeEach
     void setUp() {
         stageStore = new GenerationStageStore(repository, new ObjectMapper());
         generator = new StoryBibleGenerator(aiClient, stageStore);
     }
 
+    /**
+     * 验证输入哈希命中时会复用已保存的故事圣经。
+     */
     @Test
     void reusesCachedStoryBibleWhenInputHashMatches() {
         GenerationJob job = persistedJob(12L);
@@ -77,6 +83,9 @@ class StoryBibleGeneratorTest {
         verify(aiClient, never()).generateStoryBible(any(), any(), any());
     }
 
+    /**
+     * 验证缓存未命中时会生成、校验并保存故事圣经。
+     */
     @Test
     void generatesValidStoryBibleAndPersistsItWhenCacheMisses() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -102,6 +111,9 @@ class StoryBibleGeneratorTest {
         assertThat(saved.getOutputJson()).contains("\"id\":\"loc_001\"");
     }
 
+    /**
+     * 验证人物 ID 不符合稳定格式时会记录失败阶段。
+     */
     @Test
     void recordsFailedStageWhenCharacterIdIsInvalid() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -132,6 +144,9 @@ class StoryBibleGeneratorTest {
         assertThat(saved.getErrorMessage()).contains("char_001");
     }
 
+    /**
+     * 验证地点 ID 重复时会记录失败阶段。
+     */
     @Test
     void recordsFailedStageWhenLocationIdIsDuplicated() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -162,6 +177,9 @@ class StoryBibleGeneratorTest {
         assertThat(captor.getValue().getStatus()).isEqualTo(GenerationStatus.FAILED);
     }
 
+    /**
+     * 验证空章节摘要列表会在阶段查询前被拒绝。
+     */
     @Test
     void rejectsEmptyDigestListBeforeStageLookup() {
         GenerationJob job = persistedJob(51L);
@@ -174,6 +192,11 @@ class StoryBibleGeneratorTest {
                 any(), any(), any(), any());
     }
 
+    /**
+     * 构造故事圣经测试用的章节摘要。
+     *
+     * @return 章节摘要样例。
+     */
     private static ChapterDigest sampleDigest() {
         return new ChapterDigest(
                 1,
@@ -188,6 +211,11 @@ class StoryBibleGeneratorTest {
         );
     }
 
+    /**
+     * 构造满足稳定 ID 约束的故事圣经样例。
+     *
+     * @return 故事圣经样例。
+     */
     private static StoryBible sampleBible() {
         return new StoryBible(
                 List.of(
@@ -203,6 +231,12 @@ class StoryBibleGeneratorTest {
         );
     }
 
+    /**
+     * 构造带主键的生成任务，模拟已持久化状态。
+     *
+     * @param id 任务主键。
+     * @return 已设置主键的生成任务。
+     */
     private static GenerationJob persistedJob(Long id) {
         GenerationJob job = new GenerationJob(new NovelProject("title", "source"));
         try {
@@ -215,6 +249,12 @@ class StoryBibleGeneratorTest {
         }
     }
 
+    /**
+     * 将故事圣经转为 JSON，便于模拟缓存命中的阶段输出。
+     *
+     * @param bible 故事圣经。
+     * @return JSON 文本。
+     */
     private static String toJson(StoryBible bible) {
         try {
             return new ObjectMapper().writeValueAsString(bible);
@@ -223,6 +263,14 @@ class StoryBibleGeneratorTest {
         }
     }
 
+    /**
+     * 构造与生产代码一致的故事圣经输入快照，用于计算预期缓存哈希。
+     *
+     * @param project 小说改编项目。
+     * @param chapterDigests 章节摘要列表。
+     * @param options 生成参数。
+     * @return 哈希输入快照。
+     */
     private static StoryBibleInput storyBibleInput(NovelProject project, List<ChapterDigest> chapterDigests,
                                                    GenerationOptions options) {
         return new StoryBibleInput(
@@ -238,6 +286,19 @@ class StoryBibleGeneratorTest {
         );
     }
 
+    /**
+     * 故事圣经测试使用的输入快照结构。
+     *
+     * @param projectId 项目主键。
+     * @param projectTitle 项目标题。
+     * @param chapterDigests 章节摘要列表。
+     * @param format 剧本形式。
+     * @param tone 整体风格。
+     * @param dialogueDensity 对白密度。
+     * @param narrationRetention 旁白保留度。
+     * @param hasAdditionalInstructions 是否包含补充要求。
+     * @param additionalInstructions 补充要求。
+     */
     private record StoryBibleInput(
             Long projectId,
             String projectTitle,

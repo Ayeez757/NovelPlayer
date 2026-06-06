@@ -13,6 +13,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class YamlExporterTest {
 
+    /**
+     * 验证 YAML 导出会把 Java 驼峰字段转换为下划线字段。
+     */
     @Test
     void exportsSnakeCaseYaml() {
         ScriptDocument document = new ScriptDocument(

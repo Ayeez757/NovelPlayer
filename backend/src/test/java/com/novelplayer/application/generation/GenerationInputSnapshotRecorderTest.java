@@ -15,8 +15,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * 覆盖生成输入快照记录器，确保任务输入会作为阶段结果写入。
+ */
 class GenerationInputSnapshotRecorderTest {
 
+    /**
+     * 验证输入快照会计算哈希并通过阶段存储保存。
+     */
     @Test
     void recordsSnapshotThroughStageStore() {
         GenerationStageStore stageStore = mock(GenerationStageStore.class);
@@ -36,6 +42,13 @@ class GenerationInputSnapshotRecorderTest {
         verify(stageStore).saveSucceeded(eq(job), eq(GenerationStageNames.GENERATION_INPUT), eq("hash-001"), any());
     }
 
+    /**
+     * 构造带主键的生成任务，模拟已经持久化的实体。
+     *
+     * @param id 任务主键。
+     * @param project 所属项目。
+     * @return 已设置主键的生成任务。
+     */
     private static GenerationJob persistedJob(Long id, NovelProject project) {
         GenerationJob job = new GenerationJob(project);
         try {

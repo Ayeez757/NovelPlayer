@@ -13,6 +13,9 @@ class ChapterSplitterTest {
 
     private final ChapterSplitter splitter = new ChapterSplitter();
 
+    /**
+     * 验证中文章节标题能被识别并按标题切分正文。
+     */
     @Test
     void splitsChineseChapterHeadings() {
         String text = """
@@ -33,6 +36,9 @@ class ChapterSplitterTest {
         assertThat(chapters.get(1).content()).contains("书少了一页");
     }
 
+    /**
+     * 验证没有章节标题时会按空行退化切分。
+     */
     @Test
     void fallsBackToBlankLineChunks() {
         String text = """

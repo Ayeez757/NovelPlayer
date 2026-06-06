@@ -13,6 +13,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class GenerationIntermediateModelsTest {
 
+    /**
+     * 验证章节摘要会清理文本、过滤空白列表项并复制为不可变列表。
+     */
     @Test
     void chapterDigestNormalizesTextAndCopiesLists() {
         List<String> events = new ArrayList<>(List.of("  发现信件  ", " ", "产生冲突"));
@@ -51,6 +54,9 @@ class GenerationIntermediateModelsTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
+    /**
+     * 验证故事圣经必须包含人物、地点和主线，并会规范化可选列表。
+     */
     @Test
     void storyBibleRequiresCharactersLocationsAndMainPlot() {
         assertThatThrownBy(() -> new StoryBible(List.of(), List.of(sampleLocation()), "主线", List.of(), List.of()))
@@ -76,6 +82,9 @@ class GenerationIntermediateModelsTest {
         assertThat(bible.continuityRules()).containsExactly("第七章前不能揭露父亲身份");
     }
 
+    /**
+     * 验证场景规划至少需要一个场景，且场景列表不可变。
+     */
     @Test
     void scenePlanRequiresAtLeastOnePlannedScene() {
         assertThatThrownBy(() -> new ScenePlan(List.of()))
@@ -94,6 +103,9 @@ class GenerationIntermediateModelsTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
+    /**
+     * 验证场景大纲和分场草稿会校验后续组装必需的引用字段。
+     */
     @Test
     void plannedSceneAndSceneDraftValidateRequiredReferences() {
         assertThatThrownBy(() -> new PlannedScene(
@@ -144,6 +156,11 @@ class GenerationIntermediateModelsTest {
                 });
     }
 
+    /**
+     * 构造中间模型测试用的人物档案。
+     *
+     * @return 人物档案样例。
+     */
     private static BibleCharacter sampleCharacter() {
         return new BibleCharacter(
                 " char_001 ",
@@ -156,10 +173,20 @@ class GenerationIntermediateModelsTest {
         );
     }
 
+    /**
+     * 构造中间模型测试用的地点档案。
+     *
+     * @return 地点档案样例。
+     */
     private static BibleLocation sampleLocation() {
         return new BibleLocation(" loc_001 ", " 旧书店 ", " interior ", " 昏暗 ");
     }
 
+    /**
+     * 构造中间模型测试用的场景大纲。
+     *
+     * @return 场景大纲样例。
+     */
     private static PlannedScene samplePlannedScene() {
         return new PlannedScene(
                 " scene_001 ",

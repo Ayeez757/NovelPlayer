@@ -15,6 +15,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class MockScriptAiClientTest {
 
+    /**
+     * 验证模拟生成会把用户补充要求回显到修订备注中。
+     */
     @Test
     void echoesAdditionalInstructionsInRevisionNotes() {
         NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");

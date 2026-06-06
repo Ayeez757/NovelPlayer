@@ -57,6 +57,12 @@ public class ScriptGenerationPipeline {
         return document;
     }
 
+    /**
+     * 安全读取列表大小，用于生成阶段日志。
+     *
+     * @param values 待统计列表。
+     * @return 列表大小；列表为空引用时返回 -1。
+     */
     private static int safeSize(List<?> values) {
         return values == null ? -1 : values.size();
     }
