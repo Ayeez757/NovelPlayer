@@ -2,7 +2,7 @@
   <main class="workspace-shell">
     <header class="workspace-topbar">
       <section class="brand-banner">
-        <h1>NovelPlayer</h1>
+        <h1 style="color: #3b82f6;">NovelPlayer</h1>
         <p>从小说原文到剧本草稿的改编工作台。</p>
       </section>
 
@@ -10,9 +10,6 @@
 
       <div class="topbar-actions">
         <RouterLink to="/" class="topbar-link">返回首页</RouterLink>
-        <button type="button" class="topbar-button" @click="toggleAiPanel">
-          {{ aiPanelOpen ? '隐藏 AI 面板' : '打开 AI 面板' }}
-        </button>
       </div>
     </header>
 
@@ -180,12 +177,12 @@
               <h2>识别章节</h2>
             </div>
             <span class="content-card__meta">
-              {{ project ? `${project.chapters.length} 章` : '尚未识别' }}
+              {{ project ? selectedChapterSummary : '尚未识别' }}
             </span>
           </div>
 
           <p class="content-card__description">
-            点击后会根据章节标题规则先切分原文，识别完成后会在当前工作台内直接展示章节列表。
+            点击后会根据章节标题规则先切分原文。识别完成后，你可以在这个板块里直接选择本次准备参与生成的章节。
           </p>
 
           <div class="action-row">
@@ -196,11 +193,39 @@
           <article class="result-panel result-panel--chapter-inline">
             <div class="result-panel__heading">
               <h3>章节列表</h3>
-              <span>{{ project ? `${project.chapters.length} 章` : '暂无结果' }}</span>
+              <span>{{ project ? selectedChapterSummary : '暂无结果' }}</span>
             </div>
 
-            <ChapterList v-if="project" :chapters="project.chapters" />
-            <div v-else class="empty-state">章节识别完成后，这里会显示每章摘要。</div>
+            <template v-if="project">
+              <div class="chapter-selection-toolbar">
+                <div class="chapter-selection-summary">
+                  <strong>{{ selectedChapterCount }}</strong>
+                  <span>/ {{ project.chapters.length }} 章已选</span>
+                </div>
+
+                <div class="chapter-selection-actions">
+                  <button type="button" class="text-link" @click="selectAllChapters">全选</button>
+                  <button type="button" class="text-link" @click="clearChapterSelection">清空</button>
+                </div>
+              </div>
+
+              <ChapterList
+                :chapters="project.chapters"
+                :selected-indexes="selectedChapterIndexes"
+                selectable
+                @toggle="toggleChapterSelection"
+              />
+
+              <p
+                v-if="hasCustomChapterSelection && !supportsChapterSelectionSubmission"
+                class="chapter-selection-note"
+              >
+                当前工作台已经支持章节勾选，但这份仓库里还没有看到后端章节选择入参。
+                现在如果要按子集章节生成，需要等同事接口合入后再补这一层请求映射。
+              </p>
+            </template>
+
+            <div v-else class="empty-state">章节识别完成后，这里会显示每章摘要与选择状态。</div>
           </article>
         </section>
 
@@ -236,7 +261,7 @@
                 </el-select>
               </el-form-item>
 
-              <el-form-item label="对话密度">
+              <el-form-item label="对白密度">
                 <el-slider v-model="options.dialogueDensity" :min="0" :max="100" />
               </el-form-item>
 
@@ -249,7 +274,7 @@
               <h3>生成准备</h3>
               <ul>
                 <li>当前项目：{{ project?.title ?? form.title }}</li>
-                <li>章节数量：{{ project ? `${project.chapters.length} 章` : '等待识别章节' }}</li>
+                <li>参与生成章节：{{ project ? selectedChapterSummary : '等待识别章节' }}</li>
                 <li>剧本类型：{{ formatLabel }}</li>
                 <li>风格倾向：{{ toneLabel }}</li>
               </ul>
@@ -257,15 +282,13 @@
               <div class="submit-summary__actions">
                 <el-button
                   type="success"
-                  :disabled="!project"
+                  size="large"
+                  class="generate-script-button"
+                  :disabled="!project || !hasSelectedChapters"
                   :loading="generating"
                   @click="generate"
                 >
                   生成剧本
-                </el-button>
-
-                <el-button :disabled="!project || !script" plain @click="downloadScript">
-                  下载 YAML
                 </el-button>
               </div>
             </div>
@@ -294,6 +317,16 @@
             </div>
 
             <ScriptYamlEditor v-model="yamlDraft" />
+
+            <el-button
+              type="success"
+              size="large"
+              class="generate-script-button yaml-download-button"
+              :disabled="!project || !script"
+              @click="downloadScript"
+            >
+              下载 YAML
+            </el-button>
           </article>
         </section>
 
@@ -343,105 +376,11 @@
                   <p>{{ item.message }}</p>
                 </li>
               </ul>
-              <div v-else class="empty-state">
-                生成开始后，这里会按阶段展示实时日志。
-              </div>
+              <div v-else class="empty-state">生成开始后，这里会按阶段展示实时日志。</div>
             </article>
           </div>
         </section>
       </div>
-
-      <aside
-        v-if="!isCompactLayout || aiPanelOpen"
-        class="ai-panel"
-        :class="{ 'is-collapsed': !aiPanelOpen && !isCompactLayout }"
-        :style="aiPanelStyle"
-      >
-        <button
-          v-if="!isCompactLayout"
-          type="button"
-          class="sidebar-edge-toggle sidebar-edge-toggle--right"
-          :aria-label="aiPanelOpen ? '隐藏 AI 侧边栏' : '展开 AI 侧边栏'"
-          @click="toggleAiPanel"
-        >
-          <el-icon>
-            <DArrowRight v-if="aiPanelOpen" />
-            <DArrowLeft v-else />
-          </el-icon>
-        </button>
-
-        <template v-if="aiPanelOpen">
-          <button
-            v-if="!isCompactLayout"
-            type="button"
-            class="ai-panel__resize-handle"
-            aria-label="拖动调整 AI 面板宽度"
-            @pointerdown="startAiResize"
-          />
-
-          <div class="ai-panel__content">
-            <section class="sidebar-panel ai-section ai-section--header">
-              <header class="ai-panel__header">
-                <div>
-                  <p>AI 侧边栏</p>
-                  <h2>对话助手</h2>
-                </div>
-
-                <button type="button" class="text-link" @click="toggleAiPanel">隐藏</button>
-              </header>
-            </section>
-
-            <section class="sidebar-panel ai-section ai-section--messages">
-              <div class="sidebar-panel__heading">
-                <h2>对话记录</h2>
-                <span>{{ aiMessages.length }} 条</span>
-              </div>
-
-              <div class="ai-messages-container">
-                <div class="ai-message-list">
-                  <article
-                    v-for="item in aiMessages"
-                    :key="item.id"
-                    class="ai-message"
-                    :class="{ 'is-user': item.role === 'user' }"
-                  >
-                    <div class="ai-message__meta">
-                      <strong>{{ item.role === 'assistant' ? 'AI 助手' : '你' }}</strong>
-                      <span>{{ item.time }}</span>
-                    </div>
-                    <p>{{ item.content }}</p>
-                  </article>
-                </div>
-              </div>
-            </section>
-
-            <section class="sidebar-panel ai-section ai-section--composer">
-              <div class="sidebar-panel__heading">
-                <h2>发送消息</h2>
-                <span>前端演示助手</span>
-              </div>
-
-              <footer class="ai-panel__composer">
-                <el-input
-                  v-model="aiDraft"
-                  type="textarea"
-                  resize="none"
-                  :rows="4"
-                  placeholder="例如：帮我梳理当前步骤，或者解释这个模块为什么在高亮。"
-                  @keydown.enter.exact.prevent="sendAiMessage"
-                />
-
-                <div class="ai-panel__composer-actions">
-                  <span>Enter 发送，Shift + Enter 换行</span>
-                  <el-button type="primary" :disabled="!aiDraft.trim()" @click="sendAiMessage">
-                    发送
-                  </el-button>
-                </div>
-              </footer>
-            </section>
-          </div>
-        </template>
-      </aside>
     </section>
   </main>
 </template>
@@ -455,14 +394,11 @@ import ScriptYamlEditor from '../features/workspace/components/ScriptYamlEditor.
 import { useWorkspacePage } from '../features/workspace/composables/useWorkspacePage'
 
 const {
-  aiDraft,
-  aiMessages,
-  aiPanelOpen,
-  aiPanelStyle,
+  clearChapterSelection,
+  clearSourceText,
   contentSections,
   create,
   creating,
-  clearSourceText,
   currentPageType,
   currentPageTypeLabel,
   currentSection,
@@ -476,21 +412,25 @@ const {
   generationLogs,
   generationMessage,
   generationStage,
+  hasCustomChapterSelection,
+  hasSelectedChapters,
   isCompactLayout,
   leftSidebarCollapsed,
   options,
-  pageTypeLabels,
   project,
   restoreSampleText,
   script,
   scrollToSection,
+  selectAllChapters,
   selectPageType,
-  sendAiMessage,
+  selectedChapterCount,
+  selectedChapterIndexes,
+  selectedChapterSummary,
   setSectionRef,
   sourceCharacterCount,
-  startAiResize,
   startLeftSidebarResize,
-  toggleAiPanel,
+  supportsChapterSelectionSubmission,
+  toggleChapterSelection,
   toggleLeftSidebar,
   viewMode,
   viewModeOptions,

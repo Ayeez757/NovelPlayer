@@ -13,7 +13,7 @@
     <section class="home-stage">
       <p class="home-announcement">
         <span>🎉</span>
-        前端分层版首页已上线，当前可直接进入改编工作台体验完整流程。
+        项目已上线~当前可直接进入改编工作台体验完整流程。
       </p>
 
       <h1 class="home-wordmark">novelplayer</h1>

@@ -128,21 +128,18 @@
 @media (max-width: 720px) {
   .workspace-topbar,
   .workspace-sidebar,
-  .workspace-center,
-  .ai-panel {
+  .workspace-center {
     animation: none;
   }
 
   .brand-banner,
   .sidebar-panel,
-  .content-card,
-  .ai-panel {
+  .content-card {
     border-radius: 16px;
   }
 
   .content-card,
-  .sidebar-panel,
-  .ai-panel {
+  .sidebar-panel {
     padding: 16px;
   }
 }

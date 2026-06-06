@@ -33,15 +33,10 @@
 
 .workspace-body {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) auto;
+  grid-template-columns: 300px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
   transition: grid-template-columns 0.28s var(--float-ease);
-}
-
-.workspace-body > :last-child {
-  justify-self: end;
-  margin-left: auto;
 }
 
 .topbar-actions {

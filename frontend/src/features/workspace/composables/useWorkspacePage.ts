@@ -1,20 +1,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import type { CSSProperties, ComponentPublicInstance } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createProject, generateScriptStream, scriptDownloadUrl } from '../../../api/projectApi'
-import type {
-  GenerationRequest,
-  GenerationStreamEvent,
-  ProjectResponse,
-  ScriptDocumentResponse
-} from '../../../api/types'
+import { createProject, generateScript, scriptDownloadUrl } from '../../../api/projectApi'
+import type { GenerationRequest, ProjectResponse, ScriptDocumentResponse } from '../../../api/types'
 import {
   contentSections,
   createDefaultForm,
   createDefaultGenerationOptions,
   pageTypeLabels,
   sampleText,
-  type AiMessage,
   type GenerationLogItem,
   type PageType,
   type SectionId,
@@ -35,6 +29,7 @@ export function useWorkspacePage() {
   const generationMessage = ref('')
   const generationJobId = ref<number | null>(null)
   const generationLogs = ref<GenerationLogItem[]>([])
+  const selectedChapterIndexes = ref<number[]>([])
 
   const currentSection = ref<SectionId>('text-input')
   const currentPageType = ref<PageType>('instant-write')
@@ -43,29 +38,36 @@ export function useWorkspacePage() {
   const workspaceBodyRef = ref<HTMLElement | null>(null)
   const leftSidebarCollapsed = ref(false)
   const leftSidebarWidth = ref(300)
-  const aiPanelOpen = ref(false)
-  const aiDraft = ref('')
-  const aiPanelWidth = ref(420)
   const isResizingLeftSidebar = ref(false)
-  const isResizingAi = ref(false)
   const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
-  const aiMessages = ref<AiMessage[]>([
-    {
-      id: 1,
-      role: 'assistant',
-      content: '这里先作为前端演示用的 AI 面板。你可以问我当前流程该怎么走，或者让我们一起梳理页面结构。',
-      time: formatTime()
-    }
-  ])
 
   const observedSections = new Map<SectionId, HTMLElement>()
   let sectionObserver: IntersectionObserver | null = null
+
+  const supportsChapterSelectionSubmission = false
 
   const currentSectionMeta = computed(
     () => contentSections.find((item) => item.id === currentSection.value) ?? contentSections[0]
   )
   const currentPageTypeLabel = computed(() => pageTypeLabels[currentPageType.value])
   const sourceCharacterCount = computed(() => form.sourceText.replace(/\s+/g, '').length)
+  const totalChapterCount = computed(() => project.value?.chapters.length ?? 0)
+  const selectedChapterCount = computed(() => selectedChapterIndexes.value.length)
+  const hasSelectedChapters = computed(() => selectedChapterCount.value > 0)
+  const hasCustomChapterSelection = computed(() => {
+    return (
+      project.value !== null &&
+      selectedChapterCount.value > 0 &&
+      selectedChapterCount.value < totalChapterCount.value
+    )
+  })
+  const selectedChapterSummary = computed(() => {
+    if (!project.value) {
+      return '等待识别章节'
+    }
+
+    return `${selectedChapterCount.value}/${totalChapterCount.value} 章已选`
+  })
   const isCompactLayout = computed(() => viewportWidth.value < 1100)
 
   const workspaceBodyStyle = computed<CSSProperties | undefined>(() => {
@@ -74,22 +76,8 @@ export function useWorkspacePage() {
     }
 
     const leftWidth = leftSidebarCollapsed.value ? 34 : leftSidebarWidth.value
-    const rightWidth = aiPanelOpen.value ? aiPanelWidth.value : 0
-
     return {
-      gridTemplateColumns: `${leftWidth}px minmax(0, 1fr) ${rightWidth}px`
-    }
-  })
-
-  const aiPanelStyle = computed<CSSProperties>(() => {
-    if (isCompactLayout.value) {
-      return {
-        width: 'min(92vw, 420px)'
-      }
-    }
-
-    return {
-      width: aiPanelOpen.value ? `${aiPanelWidth.value}px` : '0px'
+      gridTemplateColumns: `${leftWidth}px minmax(0, 1fr)`
     }
   })
 
@@ -199,13 +187,18 @@ export function useWorkspacePage() {
         title: form.title,
         sourceText: form.sourceText
       })
+      syncChapterSelection(project.value.chapters.map((chapter) => chapter.index))
       script.value = null
       yamlDraft.value = ''
       generationStage.value = ''
       generationMessage.value = ''
       generationJobId.value = null
       generationLogs.value = []
-      appendLog('章节识别', '章节识别完成，项目上下文已建立。', 'success')
+      appendLog(
+        '章节识别',
+        `章节识别完成，已载入 ${project.value.chapters.length} 章并默认全选。`,
+        'success'
+      )
       ElMessage.success('章节识别完成')
     } catch (error) {
       const message = getErrorMessage(error)
@@ -221,17 +214,28 @@ export function useWorkspacePage() {
       return
     }
 
+    if (!hasSelectedChapters.value) {
+      ElMessage.warning('请至少选择 1 章再生成')
+      return
+    }
+
+    if (hasCustomChapterSelection.value && !supportsChapterSelectionSubmission) {
+      ElMessage.warning('当前后端还没有章节选择入参，暂时只能按全部章节生成。')
+      appendLog('章节选择', '检测到部分章节被选中，但当前后端接口尚未提供章节选择入参。', 'error')
+      return
+    }
+
     generating.value = true
     script.value = null
     yamlDraft.value = ''
-    generationStage.value = 'preparing_project'
-    generationMessage.value = '正在创建生成任务'
+    generationStage.value = 'generating'
+    generationMessage.value = '正在生成剧本'
     generationJobId.value = null
     generationLogs.value = []
-    appendLog('任务启动', '已开始流式生成剧本。')
+    appendLog('任务启动', '已开始同步生成剧本。')
 
     try {
-      const generatedScript = await generateScriptStream(project.value.id, options, handleGenerationEvent)
+      const generatedScript = await generateScript(project.value.id, buildGenerationPayload())
       script.value = generatedScript
       yamlDraft.value = generatedScript.yamlContent
       generationStage.value = 'completed'
@@ -249,32 +253,6 @@ export function useWorkspacePage() {
     }
   }
 
-  function handleGenerationEvent(event: GenerationStreamEvent) {
-    if (event.jobId) {
-      generationJobId.value = event.jobId
-    }
-
-    if (event.stage) {
-      generationStage.value = event.stage
-    }
-
-    if (event.message) {
-      generationMessage.value = event.message
-    }
-
-    if (event.type === 'completed' && event.script) {
-      script.value = event.script
-      yamlDraft.value = event.script.yamlContent
-    }
-
-    if (event.message) {
-      const stageLabel = event.stage || event.type
-      const level =
-        event.type === 'error' ? 'error' : event.type === 'completed' ? 'success' : 'info'
-      appendLog(stageLabel, event.message, level)
-    }
-  }
-
   function downloadScript() {
     if (!project.value) {
       return
@@ -283,12 +261,28 @@ export function useWorkspacePage() {
     window.location.href = scriptDownloadUrl(project.value.id)
   }
 
-  function toggleAiPanel() {
-    aiPanelOpen.value = !aiPanelOpen.value
+  function toggleChapterSelection(index: number) {
+    const nextSelection = new Set(selectedChapterIndexes.value)
 
-    if (aiPanelOpen.value && !isCompactLayout.value) {
-      aiPanelWidth.value = clampAiPanelWidth(Math.round(viewportWidth.value * 0.32))
+    if (nextSelection.has(index)) {
+      nextSelection.delete(index)
+    } else {
+      nextSelection.add(index)
     }
+
+    syncChapterSelection(Array.from(nextSelection))
+  }
+
+  function selectAllChapters() {
+    if (!project.value) {
+      return
+    }
+
+    syncChapterSelection(project.value.chapters.map((chapter) => chapter.index))
+  }
+
+  function clearChapterSelection() {
+    selectedChapterIndexes.value = []
   }
 
   function startLeftSidebarResize(event: PointerEvent) {
@@ -300,59 +294,23 @@ export function useWorkspacePage() {
     event.preventDefault()
   }
 
-  function startAiResize(event: PointerEvent) {
-    if (isCompactLayout.value) {
+  function handleSidebarResize(event: PointerEvent) {
+    const rect = workspaceBodyRef.value?.getBoundingClientRect()
+
+    if (!rect || !isResizingLeftSidebar.value) {
       return
     }
 
-    isResizingAi.value = true
-    event.preventDefault()
+    leftSidebarWidth.value = clampLeftSidebarWidth(event.clientX - rect.left)
   }
 
-  function sendAiMessage() {
-    const content = aiDraft.value.trim()
-
-    if (!content) {
-      return
-    }
-
-    aiMessages.value.push({
-      id: Date.now(),
-      role: 'user',
-      content,
-      time: formatTime()
-    })
-
-    aiDraft.value = ''
-
-    window.setTimeout(() => {
-      aiMessages.value.push({
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: buildAiReply(content),
-        time: formatTime()
-      })
-    }, 280)
+  function stopSidebarResize() {
+    isResizingLeftSidebar.value = false
   }
 
-  function buildAiReply(prompt: string) {
-    if (prompt.includes('章节')) {
-      return '建议先完成“识别章节”，这样章节列表和后续的生成上下文都会先建立起来。'
-    }
-
-    if (prompt.toLowerCase().includes('yaml')) {
-      return 'YAML 初稿会在“YAML 初稿”模块出现，生成完成后你可以直接继续编辑。'
-    }
-
-    if (prompt.includes('当前') || prompt.includes('在哪')) {
-      return `你当前聚焦的是“${currentSectionMeta.value.label}”模块，左侧目录会跟着滚动位置自动高亮。`
-    }
-
-    if (prompt.toLowerCase().includes('ai')) {
-      return '这个 AI 面板目前先作为前端演示交互，主要帮助我们验证布局、消息流和后续接接口的位置。'
-    }
-
-    return '这个 AI 面板现在先服务于工作台演示。你可以继续问我当前步骤、布局职责，或者让我们一起梳理改编流程。'
+  function handleViewportResize() {
+    viewportWidth.value = window.innerWidth
+    leftSidebarWidth.value = clampLeftSidebarWidth(leftSidebarWidth.value)
   }
 
   function appendLog(stage: string, message: string, level: GenerationLogItem['level'] = 'info') {
@@ -365,42 +323,29 @@ export function useWorkspacePage() {
     })
   }
 
-  function handleSidebarResize(event: PointerEvent) {
-    const rect = workspaceBodyRef.value?.getBoundingClientRect()
-
-    if (!rect) {
+  function syncChapterSelection(indexes: number[]) {
+    if (!project.value) {
+      selectedChapterIndexes.value = indexes
       return
     }
 
-    if (isResizingLeftSidebar.value) {
-      leftSidebarWidth.value = clampLeftSidebarWidth(event.clientX - rect.left)
-    }
-
-    if (isResizingAi.value) {
-      aiPanelWidth.value = clampAiPanelWidth(rect.right - event.clientX)
-    }
+    const availableIndexes = project.value.chapters.map((chapter) => chapter.index)
+    const selectedSet = new Set(indexes)
+    selectedChapterIndexes.value = availableIndexes.filter((index) => selectedSet.has(index))
   }
 
-  function stopSidebarResize() {
-    isResizingLeftSidebar.value = false
-    isResizingAi.value = false
-  }
-
-  function handleViewportResize() {
-    viewportWidth.value = window.innerWidth
-    leftSidebarWidth.value = clampLeftSidebarWidth(leftSidebarWidth.value)
-    aiPanelWidth.value = clampAiPanelWidth(aiPanelWidth.value)
+  function buildGenerationPayload(): GenerationRequest {
+    return {
+      ...options
+    }
   }
 
   return {
-    aiDraft,
-    aiMessages,
-    aiPanelOpen,
-    aiPanelStyle,
+    clearChapterSelection,
+    clearSourceText,
     contentSections,
     create,
     creating,
-    clearSourceText,
     currentPageType,
     currentPageTypeLabel,
     currentSection,
@@ -414,21 +359,25 @@ export function useWorkspacePage() {
     generationLogs,
     generationMessage,
     generationStage,
+    hasCustomChapterSelection,
+    hasSelectedChapters,
     isCompactLayout,
     leftSidebarCollapsed,
     options,
-    pageTypeLabels,
     project,
     restoreSampleText,
     script,
     scrollToSection,
+    selectAllChapters,
     selectPageType,
-    sendAiMessage,
+    selectedChapterCount,
+    selectedChapterIndexes,
+    selectedChapterSummary,
     setSectionRef,
     sourceCharacterCount,
-    startAiResize,
     startLeftSidebarResize,
-    toggleAiPanel,
+    supportsChapterSelectionSubmission,
+    toggleChapterSelection,
     toggleLeftSidebar,
     viewMode,
     viewModeOptions,
@@ -436,11 +385,6 @@ export function useWorkspacePage() {
     workspaceBodyStyle,
     yamlDraft
   }
-}
-
-function clampAiPanelWidth(value: number) {
-  const maxWidth = Math.max(400, Math.floor(window.innerWidth * 0.45))
-  return Math.min(Math.max(value, 360), maxWidth)
 }
 
 function clampLeftSidebarWidth(value: number) {

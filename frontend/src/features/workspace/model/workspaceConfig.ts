@@ -21,13 +21,6 @@ export interface GenerationLogItem {
   level: 'info' | 'success' | 'error'
 }
 
-export interface AiMessage {
-  id: number
-  role: 'assistant' | 'user'
-  content: string
-  time: string
-}
-
 export interface WorkspaceForm {
   title: string
   sourceText: string
@@ -66,7 +59,8 @@ export function createDefaultGenerationOptions(): GenerationRequest {
     format: 'web_drama',
     tone: 'suspense',
     dialogueDensity: 60,
-    narrationRetention: 30
+    narrationRetention: 30,
+    additionalInstructions: ''
   }
 }
 
