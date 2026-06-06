@@ -10,9 +10,8 @@
 </template>
 
 <script setup lang="ts">
-import type { ChapterResponse } from '../api/types'
+import type { ChapterResponse } from '../../../api/types'
 
-// 只接收章节摘要，不暴露完整正文，避免列表组件承担过多职责。
 defineProps<{
   chapters: ChapterResponse[]
 }>()

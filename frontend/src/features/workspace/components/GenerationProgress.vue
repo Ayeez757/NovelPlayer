@@ -1,22 +1,22 @@
 <template>
   <div class="progress-box">
     <el-steps :active="activeStep" direction="vertical" finish-status="success">
-      <el-step title="章节识别" :description="project ? '已完成章节拆分' : '等待上传原文'" />
+      <el-step title="章节识别" :description="project ? '已完成章节拆分' : '等待录入原文'" />
       <el-step title="结构生成" :description="structureDescription" />
       <el-step title="YAML 导出" :description="yamlDescription" />
     </el-steps>
 
     <div v-if="generating || currentMessage || jobId" class="progress-meta">
-      <p v-if="jobId">任务 ID: {{ jobId }}</p>
+      <p v-if="jobId">任务 ID：{{ jobId }}</p>
       <p v-if="currentMessage">{{ currentMessage }}</p>
-      <p v-if="currentStageLabel">当前阶段: {{ currentStageLabel }}</p>
+      <p v-if="currentStageLabel">当前阶段：{{ currentStageLabel }}</p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ProjectResponse, ScriptDocumentResponse } from '../api/types'
+import type { ProjectResponse, ScriptDocumentResponse } from '../../../api/types'
 
 const props = defineProps<{
   project: ProjectResponse | null
@@ -46,7 +46,7 @@ const stageLabels: Record<string, string> = {
   script_generation: '整体生成',
   calling_model: '调用模型',
   validating_schema: '校验剧本结构',
-  serializing_json: '序列化权威 JSON',
+  serializing_json: '序列化 JSON',
   exporting_yaml: '导出 YAML',
   saving_snapshot: '保存结果',
   completed: '已完成',
@@ -83,28 +83,3 @@ const yamlDescription = computed(() => {
   return '等待结构化剧本生成完成'
 })
 </script>
-
-<style scoped>
-.progress-box {
-  display: grid;
-  gap: 16px;
-}
-
-.progress-meta {
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.progress-meta p {
-  margin: 0;
-  color: #d6d6d6;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.progress-meta p + p {
-  margin-top: 4px;
-}
-</style>
