@@ -5,20 +5,37 @@ import com.novelplayer.domain.project.NovelChapter;
 import com.novelplayer.domain.project.NovelProject;
 import com.novelplayer.domain.script.ScriptDocument;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
-@Component
-@ConditionalOnProperty(prefix = "novel-player.generation", name = "mock-ai", havingValue = "true", matchIfMissing = true)
 /**
  * 稳定可重复的本地模拟实现，用于没有 DeepSeek 密钥时的演示、测试和开发。
+ *
+ * 它和真实 AI 实现共用同一个接口，方便前后端在无网络或无密钥时验证完整闭环。
  */
+@Component
+@ConditionalOnProperty(prefix = "novel-player.generation", name = "mock-ai", havingValue = "true", matchIfMissing = true)
 public class MockScriptAiClient implements ScriptAiClient {
 
+    private static final Logger log = LoggerFactory.getLogger(MockScriptAiClient.class);
+
+    /**
+     * 生成稳定的模拟剧本文档。
+     *
+     * @param project 小说改编项目。
+     * @param chapters 按章节顺序排列的原文。
+     * @param options 改编控制选项。
+     * @return 可通过校验和导出的模拟剧本文档。
+     */
     @Override
     public ScriptDocument generateScript(NovelProject project, List<NovelChapter> chapters, GenerationOptions options) {
+        log.info("Generating mock script projectId={} chapterCount={} format={} tone={} hasAdditionalInstructions={}",
+                project.getId(), chapters.size(), options.format(), options.tone(), options.hasAdditionalInstructions());
         // 模拟结果也必须符合剧本结构约定，才能端到端验证界面、校验和 YAML 导出。
         List<ScriptDocument.CharacterProfile> characters = List.of(
                 new ScriptDocument.CharacterProfile("char_001", "主角", List.of("她", "他"), "protagonist",
@@ -27,6 +44,7 @@ public class MockScriptAiClient implements ScriptAiClient {
                         "隐藏真相并制造阻力", List.of("冷静", "强势"), "语气平稳，常用反问")
         );
 
+        // 使用稳定编号，确保引用校验、YAML 导出和前端预览都走真实路径。
         List<ScriptDocument.LocationProfile> locations = List.of(
                 new ScriptDocument.LocationProfile("loc_001", "核心场景", "interior", "从原文章节中抽象出的主要冲突发生地")
         );
@@ -34,6 +52,7 @@ public class MockScriptAiClient implements ScriptAiClient {
         List<ScriptDocument.Scene> scenes = chapters.stream()
                 .map(chapter -> toScene(chapter, characters.get(0), characters.get(1)))
                 .toList();
+        log.debug("Mock script scenes built projectId={} sceneCount={}", project.getId(), scenes.size());
 
         return new ScriptDocument(
                 "1.0",
@@ -44,10 +63,29 @@ public class MockScriptAiClient implements ScriptAiClient {
                 characters,
                 locations,
                 scenes,
-                List.of("当前为本地模拟初稿，用于无模型密钥情况下验证产品闭环。", "后续接入 DeepSeek 后会生成更贴合原文的场景和对白。")
+                revisionNotes(options)
         );
     }
 
+    private List<String> revisionNotes(GenerationOptions options) {
+        List<String> notes = new ArrayList<>();
+        notes.add("当前为本地模拟初稿，用于无模型密钥情况下验证产品闭环。");
+        notes.add("后续接入 DeepSeek 后会生成更贴合原文的场景和对白。");
+        if (options.hasAdditionalInstructions()) {
+            // mock 无法真正理解创作要求，但要显式回显，方便确认前端输入已进入生成链路。
+            notes.add("已接收本次补充改编要求：" + options.additionalInstructions());
+        }
+        return notes;
+    }
+
+    /**
+     * 将单个章节映射成一个模拟场景。
+     *
+     * @param chapter 小说章节。
+     * @param protagonist 模拟主角档案。
+     * @param antagonist 模拟对手档案。
+     * @return 模拟场景。
+     */
     private ScriptDocument.Scene toScene(NovelChapter chapter, ScriptDocument.CharacterProfile protagonist,
                                          ScriptDocument.CharacterProfile antagonist) {
         // 摘要刻意保持较短，避免模拟输出在界面中过长影响观察。

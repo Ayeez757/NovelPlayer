@@ -25,6 +25,7 @@ export interface GenerationRequest {
   tone: string
   dialogueDensity: number
   narrationRetention: number
+  additionalInstructions: string
 }
 
 export interface ScriptDocumentResponse {
