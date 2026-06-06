@@ -95,6 +95,12 @@ public class ScriptGenerationPipeline {
         if (pipelineMode == NovelPlayerProperties.Generation.PipelineMode.LEGACY) {
             return generateLegacy(job, project, normalizedChapters, options);
         }
+
+//        组件缺失则
+        if (!isStagedPipelineAvailable()) {
+            log.warn("staged 管线已启用，但缺少 staged 组件，自动回退到 legacy 链路");
+            return generateLegacy(job, project, normalizedChapters, options);
+        }
         return generateStaged(job, project, normalizedChapters, options);
     }
 
@@ -169,6 +175,14 @@ public class ScriptGenerationPipeline {
         return document;
     }
 
+//    新增方法
+    private boolean isStagedPipelineAvailable() {
+        return chapterDigestGeneratorProvider.getIfAvailable() != null
+                && storyBibleGeneratorProvider.getIfAvailable() != null
+                && scenePlannerProvider.getIfAvailable() != null
+                && sceneDraftGeneratorProvider.getIfAvailable() != null
+                && scriptAssemblerProvider.getIfAvailable() != null;
+    }
     /**
      * 读取阶段化组件，缺失时给出明确配置错误。
      *

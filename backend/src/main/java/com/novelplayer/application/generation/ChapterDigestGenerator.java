@@ -1,5 +1,8 @@
 package com.novelplayer.application.generation;
 
+
+//增加import
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import com.novelplayer.ai.StagedScriptAiClient;
 import com.novelplayer.application.generation.model.ChapterDigest;
 import com.novelplayer.domain.generation.GenerationJob;
@@ -22,6 +25,8 @@ import java.util.Optional;
  * {@link ChapterDigest}，并通过 {@link GenerationStageStore} 复用同一输入哈希下已经成功的结果。</p>
  */
 @Service
+//增加注解
+@ConditionalOnBean(StagedScriptAiClient.class)
 @ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
         matchIfMissing = true)
 public class ChapterDigestGenerator {

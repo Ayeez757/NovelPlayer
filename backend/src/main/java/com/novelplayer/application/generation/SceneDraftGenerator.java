@@ -1,5 +1,7 @@
 package com.novelplayer.application.generation;
 
+//增加import
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import com.novelplayer.ai.StagedScriptAiClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
 import com.novelplayer.application.generation.model.BibleLocation;
@@ -34,6 +36,8 @@ import java.util.Set;
  * 最小上下文，并以 {@code scene_draft:<sceneId>} 独立落库，方便后续支持单场重生成。</p>
  */
 @Service
+//增加注解
+@ConditionalOnBean(StagedScriptAiClient.class)
 @ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
         matchIfMissing = true)
 public class SceneDraftGenerator {

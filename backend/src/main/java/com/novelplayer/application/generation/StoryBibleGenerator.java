@@ -1,5 +1,7 @@
 package com.novelplayer.application.generation;
 
+//增加import
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import com.novelplayer.ai.StagedScriptAiClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
 import com.novelplayer.application.generation.model.BibleLocation;
@@ -26,6 +28,8 @@ import java.util.regex.Pattern;
  * 人物/地点稳定 ID，避免后续场景规划和分场写作引用不可靠的编号。</p>
  */
 @Service
+//增加注解
+@ConditionalOnBean(StagedScriptAiClient.class)
 @ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
         matchIfMissing = true)
 public class StoryBibleGenerator {
