@@ -141,7 +141,33 @@ class ScriptGenerationPipelineTest {
         verify(sceneDraftGeneratorProvider, never()).getIfAvailable();
         verify(scriptAssemblerProvider, never()).getIfAvailable();
     }
+//新增失败回退测试方法
+@Test
+void fallsBackToLegacyWhenStagedPipelineComponentsAreUnavailable() {
+    ScriptGenerationPipeline pipeline = stagedPipeline();  // 当前配置先假装还是 STAGED
+    GenerationJob job = persistedJob(102L);
+    NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
+    NovelChapter chapter = new NovelChapter(project, 1, "雨夜", "她发现一封信。");
+    GenerationOptions options = GenerationOptions.defaults();
+    List<NovelChapter> chapters = List.of(chapter);
+    ScriptDocument document = sampleDocument(samplePlannedScene());
+    // 模拟“多阶段组件拿不到”。
+    when(chapterDigestGeneratorProvider.getIfAvailable()).thenReturn(null);
+//    如果回退到旧链路，就让旧链路返回一个正常结果
+    when(scriptAiClient.generateScript(project, chapters, options)).thenReturn(document);
+//    执行这次生成（来自旧链路）
+    ScriptDocument result = pipeline.generate(job, project, chapters, options);
 
+    assertThat(result).isSameAs(document);
+    assertThat(job.getCurrentStage()).isEqualTo(GenerationStageNames.LEGACY_SCRIPT_GENERATION);
+    verify(chapterDigestGeneratorProvider).getIfAvailable();
+    verify(scriptAiClient).generateScript(project, chapters, options);
+    verify(validator).validate(document);
+    verify(storyBibleGeneratorProvider, never()).getIfAvailable();
+    verify(scenePlannerProvider, never()).getIfAvailable();
+    verify(sceneDraftGeneratorProvider, never()).getIfAvailable();
+    verify(scriptAssemblerProvider, never()).getIfAvailable();
+}
     @Test
     void rejectsEmptyChapterListBeforeAnyStageRuns() {
         ScriptGenerationPipeline pipeline = stagedPipeline();

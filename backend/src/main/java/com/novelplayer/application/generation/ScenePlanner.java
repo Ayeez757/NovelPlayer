@@ -1,5 +1,7 @@
 package com.novelplayer.application.generation;
 
+//增加import
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import com.novelplayer.ai.StagedScriptAiClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
 import com.novelplayer.application.generation.model.BibleLocation;
@@ -27,6 +29,8 @@ import java.util.Set;
  * 它会校验场景对章节、人物和地点的引用，避免后续分场草稿阶段拿到不可落地的结构蓝图。</p>
  */
 @Service
+//增加注解
+@ConditionalOnBean(StagedScriptAiClient.class)
 @ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
         matchIfMissing = true)
 public class ScenePlanner {
