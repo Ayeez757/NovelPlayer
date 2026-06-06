@@ -1,5 +1,32 @@
 .app-shell {
   min-height: 100vh;
+  overflow-x: clip;
+}
+
+.app-shell__view {
+  min-height: 100vh;
+}
+
+.app-fade-enter-active,
+.app-fade-leave-active {
+  transition:
+    opacity 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.app-fade-enter-from,
+.app-fade-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.994);
+  filter: blur(10px);
+}
+
+.app-fade-enter-to,
+.app-fade-leave-from {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
 }
 
 .workspace-shell {
@@ -95,5 +122,21 @@
 @media (max-width: 720px) {
   .workspace-shell {
     padding: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-fade-enter-active,
+  .app-fade-leave-active {
+    transition: none;
+  }
+
+  .app-fade-enter-from,
+  .app-fade-leave-to,
+  .app-fade-enter-to,
+  .app-fade-leave-from {
+    opacity: 1;
+    transform: none;
+    filter: none;
   }
 }
