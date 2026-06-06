@@ -1,6 +1,5 @@
 <template>
   <div class="chapter-list">
-    <h3>识别结果</h3>
     <el-scrollbar max-height="220px">
       <div v-for="chapter in chapters" :key="chapter.index" class="chapter-item">
         <span>{{ chapter.index }}. {{ chapter.title }}</span>

@@ -1,5 +1,3 @@
-// 前端接口类型与后端响应对象保持一一对应。
-
 export interface ChapterResponse {
   index: number
   title: string
@@ -25,7 +23,6 @@ export interface GenerationRequest {
   tone: string
   dialogueDensity: number
   narrationRetention: number
-  additionalInstructions: string
 }
 
 export interface ScriptDocumentResponse {
@@ -35,4 +32,13 @@ export interface ScriptDocumentResponse {
   validationStatus: string
   yamlContent: string
   createdAt: string
+}
+
+export interface GenerationStreamEvent {
+  type: 'job_created' | 'progress' | 'completed' | 'error'
+  jobId: number | null
+  stage: string | null
+  message: string | null
+  error: string | null
+  script: ScriptDocumentResponse | null
 }
