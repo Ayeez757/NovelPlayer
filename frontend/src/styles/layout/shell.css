@@ -1,0 +1,99 @@
+.app-shell {
+  min-height: 100vh;
+}
+
+.workspace-shell {
+  position: relative;
+  min-height: 100vh;
+  padding: 18px 18px 24px;
+  isolation: isolate;
+}
+
+.workspace-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.72), transparent 18%),
+    radial-gradient(circle at 88% 18%, rgba(207, 232, 255, 0.2), transparent 16%),
+    radial-gradient(circle at 72% 86%, rgba(226, 238, 255, 0.24), transparent 18%);
+  z-index: -1;
+  animation: shellFloat var(--float-duration-slow) var(--float-ease) infinite;
+}
+
+.workspace-topbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 420px) 1fr auto;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 18px;
+  animation: floatGroup 7.4s var(--float-ease) infinite;
+}
+
+.workspace-body {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  transition: grid-template-columns 0.28s var(--float-ease);
+}
+
+.topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.topbar-link,
+.topbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid #d7e3f1;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text-body);
+  cursor: pointer;
+  transition:
+    transform 0.28s var(--float-ease),
+    box-shadow 0.28s var(--float-ease),
+    border-color 0.28s var(--float-ease),
+    color 0.28s var(--float-ease),
+    background-color 0.28s var(--float-ease);
+}
+
+.topbar-link:hover,
+.topbar-link:focus-visible,
+.topbar-button:hover,
+.topbar-button:focus-visible {
+  color: var(--brand-primary);
+  border-color: #bfdcff;
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.14);
+  transform: translateY(-2px);
+}
+
+@media (max-width: 1100px) {
+  .workspace-topbar {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+  .topbar-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .workspace-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .workspace-shell {
+    padding: 14px;
+  }
+}

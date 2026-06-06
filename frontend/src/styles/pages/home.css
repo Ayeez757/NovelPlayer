@@ -1,0 +1,255 @@
+.home-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  padding: 22px 28px 30px;
+  background-color: #d8d1be;
+}
+
+.home-page::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url('/images/home-room-background.jpg');
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+  opacity: 1;
+  filter: none;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.home-page::after {
+  content: none;
+}
+
+.home-nav,
+.home-stage,
+.home-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.home-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 4px 0;
+}
+
+.home-nav__brand {
+  color: #4b5563;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.home-nav__links {
+  display: inline-flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.home-nav__links a {
+  color: #6b7280;
+  font-size: 15px;
+  transition: color 0.24s ease;
+}
+
+.home-nav__links a:hover,
+.home-nav__links a:focus-visible {
+  color: #2563eb;
+}
+
+.home-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 1240px;
+  margin: 78px auto 0;
+  text-align: center;
+}
+
+.home-announcement {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #6b7280;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.home-wordmark {
+  margin: 46px 0 0;
+  font-size: clamp(5.8rem, 13vw, 10.4rem);
+  line-height: 0.92;
+  letter-spacing: -0.08em;
+  font-weight: 600;
+  color: #357af6;
+  text-transform: lowercase;
+  text-shadow: 0 16px 34px rgba(53, 122, 246, 0.1);
+}
+
+.home-slogan {
+  margin: 28px 0 0;
+  max-width: 20ch;
+  color: #374151;
+  font-size: clamp(2rem, 4.4vw, 3.2rem);
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: -0.04em;
+}
+
+.home-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 26px;
+  width: min(100%, 1120px);
+  margin-top: 54px;
+}
+
+.home-entry-card {
+  display: grid;
+  gap: 14px;
+  min-height: 164px;
+  padding: 30px 32px;
+  border: 1px solid rgba(229, 233, 241, 0.95);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    0 24px 54px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  text-align: left;
+  backdrop-filter: blur(12px);
+  transition:
+    transform 0.28s var(--float-ease),
+    box-shadow 0.28s var(--float-ease),
+    border-color 0.28s var(--float-ease);
+}
+
+.home-entry-card strong {
+  color: #3b6dff;
+  font-size: clamp(2rem, 3.2vw, 2.7rem);
+  font-weight: 600;
+  letter-spacing: -0.05em;
+}
+
+.home-entry-card span {
+  max-width: 28ch;
+  color: #596579;
+  font-size: 1.15rem;
+  line-height: 1.7;
+}
+
+.home-entry-card--primary:hover,
+.home-entry-card--primary:focus-visible,
+.home-entry-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(187, 210, 255, 0.96);
+  box-shadow:
+    0 30px 60px rgba(53, 122, 246, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.home-footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 36px;
+  max-width: 1120px;
+  margin: 104px auto 0;
+  padding-top: 28px;
+}
+
+.home-footer section {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+.home-footer h2 {
+  margin: 0 0 2px;
+  color: #374151;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.home-footer a {
+  color: #7b8492;
+  font-size: 14px;
+  transition: color 0.24s ease;
+}
+
+.home-footer a:hover,
+.home-footer a:focus-visible {
+  color: #2563eb;
+}
+
+@media (max-width: 960px) {
+  .home-stage {
+    margin-top: 56px;
+  }
+
+  .home-entry-grid,
+  .home-footer {
+    grid-template-columns: 1fr;
+  }
+
+  .home-page::before {
+    background-position: center center;
+    background-size: cover;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .home-page {
+    padding: 18px 16px 24px;
+  }
+
+  .home-nav {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .home-nav__links {
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+
+  .home-stage {
+    margin-top: 42px;
+  }
+
+  .home-wordmark {
+    margin-top: 34px;
+    font-size: clamp(4.2rem, 23vw, 6.4rem);
+  }
+
+  .home-slogan {
+    font-size: clamp(1.6rem, 8vw, 2.2rem);
+  }
+
+  .home-entry-card {
+    min-height: 0;
+    padding: 24px 22px;
+    border-radius: 24px;
+  }
+
+  .home-entry-card strong {
+    font-size: clamp(1.7rem, 8vw, 2.2rem);
+  }
+
+  .home-entry-card span {
+    font-size: 1rem;
+  }
+
+  .home-footer {
+    margin-top: 72px;
+    gap: 24px;
+  }
+}

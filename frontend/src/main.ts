@@ -3,6 +3,9 @@ import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import './styles/main.css'
 import App from './App.vue'
+import router from './app/router'
 
-// 前端入口：挂载 Element Plus 和根组件。
-createApp(App).use(ElementPlus).mount('#app')
+createApp(App)
+  .use(router)
+  .use(ElementPlus)
+  .mount('#app')
