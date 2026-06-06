@@ -54,6 +54,13 @@ public record GenerationOptions(
         return additionalInstructions != null && !additionalInstructions.isBlank();
     }
 
+    /**
+     * 规范化必填文本。
+     *
+     * @param value 原始文本。
+     * @param name 字段名称。
+     * @return 去除首尾空白后的文本。
+     */
     private static String normalizeRequired(String value, String name) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
@@ -61,12 +68,24 @@ public record GenerationOptions(
         return value.strip();
     }
 
+    /**
+     * 校验百分比类参数范围。
+     *
+     * @param value 参数值。
+     * @param name 字段名称。
+     */
     private static void validateRange(int value, String name) {
         if (value < 0 || value > 100) {
             throw new IllegalArgumentException(name + " must be between 0 and 100");
         }
     }
 
+    /**
+     * 规范化并清理用户补充改编要求。
+     *
+     * @param value 原始补充要求。
+     * @return 清理后的补充要求；没有有效内容时返回 null。
+     */
     private static String normalizeAdditionalInstructions(String value) {
         if (value == null || value.isBlank()) {
             return null;

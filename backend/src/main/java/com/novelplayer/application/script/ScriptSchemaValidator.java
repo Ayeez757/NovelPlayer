@@ -90,6 +90,12 @@ public class ScriptSchemaValidator {
         return violation.getPropertyPath() + " " + violation.getMessage();
     }
 
+    /**
+     * 安全读取列表大小，避免校验日志因为空列表引用抛出异常。
+     *
+     * @param values 待统计列表。
+     * @return 列表大小；列表为空引用时返回 -1。
+     */
     private static int safeSize(List<?> values) {
         return values == null ? -1 : values.size();
     }

@@ -14,6 +14,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class ScriptSchemaValidatorTest {
 
+    /**
+     * 验证场景引用未声明人物时会被结构校验拦截。
+     */
     @Test
     void rejectsMissingCharacterReference() {
         ScriptDocument document = new ScriptDocument(

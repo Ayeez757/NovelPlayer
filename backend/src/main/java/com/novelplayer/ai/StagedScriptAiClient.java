@@ -4,6 +4,7 @@ import com.novelplayer.application.generation.GenerationOptions;
 import com.novelplayer.application.generation.model.ChapterDigest;
 import com.novelplayer.application.generation.model.PlannedScene;
 import com.novelplayer.application.generation.model.SceneDraft;
+import com.novelplayer.application.generation.model.SceneDraftContext;
 import com.novelplayer.application.generation.model.ScenePlan;
 import com.novelplayer.application.generation.model.StoryBible;
 import com.novelplayer.domain.project.NovelChapter;
@@ -55,12 +56,9 @@ public interface StagedScriptAiClient {
      * 根据单个场景规划生成分场草稿。
      *
      * @param project 小说改编项目。
-     * @param plannedScene 待生成的场景大纲。
-     * @param sourceChapters 场景关联的原文章节。
-     * @param storyBible 全局故事圣经。
+     * @param context 分场写作最小上下文。
      * @param options 生成参数。
      * @return 分场草稿中间模型。
      */
-    SceneDraft generateSceneDraft(NovelProject project, PlannedScene plannedScene, List<NovelChapter> sourceChapters,
-                                  StoryBible storyBible, GenerationOptions options);
+    SceneDraft generateSceneDraft(NovelProject project, SceneDraftContext context, GenerationOptions options);
 }

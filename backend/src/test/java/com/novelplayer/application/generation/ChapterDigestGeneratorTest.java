@@ -42,12 +42,18 @@ class ChapterDigestGeneratorTest {
     private GenerationStageStore stageStore;
     private ChapterDigestGenerator generator;
 
+    /**
+     * 为每个用例创建阶段存储和章节摘要生成器。
+     */
     @BeforeEach
     void setUp() {
         stageStore = new GenerationStageStore(repository, new com.fasterxml.jackson.databind.ObjectMapper());
         generator = new ChapterDigestGenerator(aiClient, stageStore);
     }
 
+    /**
+     * 验证输入哈希命中时会复用已保存的章节摘要。
+     */
     @Test
     void reusesCachedChapterDigestWhenInputHashMatches() {
         GenerationJob job = persistedJob(12L);
@@ -84,6 +90,9 @@ class ChapterDigestGeneratorTest {
         verify(aiClient, never()).generateChapterDigest(any(), any(), any());
     }
 
+    /**
+     * 验证缓存未命中时会调用 AI 并保存成功阶段结果。
+     */
     @Test
     void generatesAndPersistsDigestWhenCacheMisses() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -118,6 +127,9 @@ class ChapterDigestGeneratorTest {
         assertThat(saved.getOutputJson()).contains("\"summary\":\"她在旧书店发现一封信。\"");
     }
 
+    /**
+     * 验证 AI 生成失败时会记录失败阶段并继续抛出原异常。
+     */
     @Test
     void recordsFailedStageAndPropagatesException() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -141,6 +153,9 @@ class ChapterDigestGeneratorTest {
         assertThat(saved.getErrorMessage()).isEqualTo("模型返回非法内容");
     }
 
+    /**
+     * 验证空章节列表会在进入阶段查询前被拒绝。
+     */
     @Test
     void rejectsEmptyChapterListEarly() {
         GenerationJob job = persistedJob(41L);
@@ -151,6 +166,12 @@ class ChapterDigestGeneratorTest {
                 .hasMessageContaining("chapters");
     }
 
+    /**
+     * 构造带主键的生成任务，模拟已持久化状态。
+     *
+     * @param id 任务主键。
+     * @return 已设置主键的生成任务。
+     */
     private static GenerationJob persistedJob(Long id) {
         GenerationJob job = new GenerationJob(new NovelProject("title", "source"));
         try {
@@ -163,6 +184,12 @@ class ChapterDigestGeneratorTest {
         }
     }
 
+    /**
+     * 将章节摘要转为 JSON，便于模拟缓存命中的阶段输出。
+     *
+     * @param digest 章节摘要。
+     * @return JSON 文本。
+     */
     private static String toJson(ChapterDigest digest) {
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(digest);
@@ -171,6 +198,14 @@ class ChapterDigestGeneratorTest {
         }
     }
 
+    /**
+     * 构造与生产代码一致的章节摘要输入快照，用于计算预期缓存哈希。
+     *
+     * @param project 小说改编项目。
+     * @param chapter 待生成摘要的章节。
+     * @param options 生成参数。
+     * @return 哈希输入快照。
+     */
     private static ChapterDigestInput chapterDigestInput(NovelProject project, NovelChapter chapter, GenerationOptions options) {
         return new ChapterDigestInput(
                 project.getId(),
@@ -187,6 +222,21 @@ class ChapterDigestGeneratorTest {
         );
     }
 
+    /**
+     * 章节摘要测试使用的输入快照结构。
+     *
+     * @param projectId 项目主键。
+     * @param projectTitle 项目标题。
+     * @param chapterIndex 章节序号。
+     * @param chapterTitle 章节标题。
+     * @param chapterContent 章节正文。
+     * @param format 剧本形式。
+     * @param tone 整体风格。
+     * @param dialogueDensity 对白密度。
+     * @param narrationRetention 旁白保留度。
+     * @param hasAdditionalInstructions 是否包含补充要求。
+     * @param additionalInstructions 补充要求。
+     */
     private record ChapterDigestInput(
             Long projectId,
             String projectTitle,

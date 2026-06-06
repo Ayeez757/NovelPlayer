@@ -96,6 +96,12 @@ public class ScriptPromptBuilder {
         return new ScriptPrompt(systemPrompt, userPrompt);
     }
 
+    /**
+     * 从 classpath 读取必需的提示词资源。
+     *
+     * @param path classpath 下的资源路径。
+     * @return 资源文本。
+     */
     private static String loadRequiredResource(String path) {
         try {
             ClassPathResource resource = new ClassPathResource(path);
@@ -111,6 +117,13 @@ public class ScriptPromptBuilder {
         }
     }
 
+    /**
+     * 校验提示词模板不为空，并去除首尾空白。
+     *
+     * @param value 模板文本。
+     * @param name 模板名称。
+     * @return 规范化后的模板文本。
+     */
     private static String normalizeTemplate(String value, String name) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");

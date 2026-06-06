@@ -22,6 +22,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * 覆盖生成阶段存储的序列化、缓存读取、失败记录和输入校验。
+ */
 @ExtendWith(MockitoExtension.class)
 class GenerationStageStoreTest {
 
@@ -30,11 +33,17 @@ class GenerationStageStoreTest {
 
     private GenerationStageStore store;
 
+    /**
+     * 为每个用例创建独立的阶段存储实例。
+     */
     @BeforeEach
     void setUp() {
         store = new GenerationStageStore(repository, new ObjectMapper());
     }
 
+    /**
+     * 验证成功阶段会序列化输出并按规范化后的阶段名、哈希保存。
+     */
     @Test
     void savesSucceededStageWithSerializedPayload() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -55,6 +64,9 @@ class GenerationStageStoreTest {
         assertThat(saved.getErrorMessage()).isNull();
     }
 
+    /**
+     * 验证成功阶段可从 JSON 反序列化回指定载荷类型。
+     */
     @Test
     void readsSucceededStageBackIntoTypedPayload() {
         GenerationJob job = persistedJob(7L);
@@ -81,6 +93,9 @@ class GenerationStageStoreTest {
         assertThat(json).isNotBlank();
     }
 
+    /**
+     * 验证同一输入哈希下存在成功结果时会被视为可复用。
+     */
     @Test
     void reportsReusableStageWhenSucceededResultExistsWithSameHash() {
         GenerationJob job = persistedJob(8L);
@@ -102,6 +117,9 @@ class GenerationStageStoreTest {
         assertThat(reusable).isTrue();
     }
 
+    /**
+     * 验证失败阶段会保存清理后的错误消息，并允许哈希为空。
+     */
     @Test
     void recordsFailedStageWithTrimmedMessageAndNullableHash() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -119,6 +137,9 @@ class GenerationStageStoreTest {
         assertThat(saved.getErrorMessage()).isEqualTo("boom");
     }
 
+    /**
+     * 验证阶段存储会拒绝未持久化任务、空阶段名和空输入哈希。
+     */
     @Test
     void validatesStageNameAndJobPresence() {
         GenerationJob job = new GenerationJob(new NovelProject("title", "source"));
@@ -134,12 +155,21 @@ class GenerationStageStoreTest {
                 .hasMessageContaining("inputHash");
     }
 
+    /**
+     * 验证 SHA-256 工具对相同输入稳定、对不同输入敏感。
+     */
     @Test
     void exposesSha256HelperForStableInputHashes() {
         assertThat(store.sha256Of("hello")).isEqualTo(store.sha256Of("hello"));
         assertThat(store.sha256Of("hello")).isNotEqualTo(store.sha256Of("world"));
     }
 
+    /**
+     * 构造带主键的生成任务，模拟已持久化状态。
+     *
+     * @param id 任务主键。
+     * @return 已设置主键的生成任务。
+     */
     private static GenerationJob persistedJob(Long id) {
         GenerationJob job = new GenerationJob(new NovelProject("title", "source"));
         try {
@@ -152,6 +182,12 @@ class GenerationStageStoreTest {
         }
     }
 
+    /**
+     * 将样例载荷转为 JSON，便于模拟数据库中保存的阶段输出。
+     *
+     * @param payload 样例载荷。
+     * @return JSON 文本。
+     */
     private static String toJson(SamplePayload payload) {
         try {
             return new ObjectMapper().writeValueAsString(payload);
@@ -160,6 +196,12 @@ class GenerationStageStoreTest {
         }
     }
 
+    /**
+     * 阶段存储测试使用的最小 JSON 载荷。
+     *
+     * @param message 测试消息。
+     * @param version 测试版本号。
+     */
     private record SamplePayload(String message, int version) {
     }
 }

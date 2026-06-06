@@ -38,6 +38,12 @@ public class ChapterContextExtractor {
             "血迹", "命令", "拒绝", "逃跑", "追问", "暴露", "试探", "报复", "复仇", "隐瞒"
     );
 
+    /**
+     * 批量提取章节上下文，并聚合跨章节候选人物、地点和冲突信号。
+     *
+     * @param chapters 按章节顺序排列的小说章节。
+     * @return 单章上下文和全局候选信息。
+     */
     public ChapterContextBundle extract(List<NovelChapter> chapters) {
         List<ChapterContext> contexts = new ArrayList<>();
         LinkedHashSet<String> globalCharacters = new LinkedHashSet<>();
@@ -47,6 +53,7 @@ public class ChapterContextExtractor {
         for (NovelChapter chapter : chapters) {
             ChapterContext context = extract(chapter);
             contexts.add(context);
+            // 用 LinkedHashSet 保留首次出现顺序，让提示词里的候选信息更接近原文阅读顺序。
             addAllLimited(globalCharacters, context.characterCandidates(), MAX_GLOBAL_ITEMS);
             addAllLimited(globalLocations, context.locationCandidates(), MAX_GLOBAL_ITEMS);
             addAllLimited(globalConflicts, context.conflictSignals(), MAX_GLOBAL_ITEMS);
@@ -60,6 +67,12 @@ public class ChapterContextExtractor {
         );
     }
 
+    /**
+     * 提取单章上下文摘要。
+     *
+     * @param chapter 待处理章节。
+     * @return 单章上下文，包含摘要、首尾钩子和启发式候选信息。
+     */
     public ChapterContext extract(NovelChapter chapter) {
         String cleaned = cleanText(chapter.getContent());
         List<String> sentences = splitSentences(cleaned);
@@ -84,6 +97,12 @@ public class ChapterContextExtractor {
         );
     }
 
+    /**
+     * 统一清理章节正文中的换行和空白字符。
+     *
+     * @param text 原始章节文本。
+     * @return 更适合正则和句子切分的文本。
+     */
     private String cleanText(String text) {
         return safeText(text)
                 .replace("\r\n", "\n")
@@ -94,6 +113,12 @@ public class ChapterContextExtractor {
                 .trim();
     }
 
+    /**
+     * 按中文标点、英文标点和换行粗略切分句子。
+     *
+     * @param text 已清洗章节文本。
+     * @return 非空句子列表。
+     */
     private List<String> splitSentences(String text) {
         if (text.isBlank()) {
             return List.of();
@@ -108,6 +133,12 @@ public class ChapterContextExtractor {
                 .toList();
     }
 
+    /**
+     * 构建短摘要，优先保留开头信息，并在文本较长时补入结尾钩子。
+     *
+     * @param sentences 章节句子列表。
+     * @return 压缩后的章节摘要。
+     */
     private String buildSummary(List<String> sentences) {
         if (sentences.isEmpty()) {
             return "";
@@ -128,6 +159,15 @@ public class ChapterContextExtractor {
         return clip(String.join(" ", picked), 180);
     }
 
+    /**
+     * 使用指定正则提取候选项，并通过谓词过滤低质量结果。
+     *
+     * @param text 待匹配文本。
+     * @param pattern 候选项正则。
+     * @param limit 最多返回数量。
+     * @param predicate 候选项质量过滤器。
+     * @return 去重且保留出现顺序的候选项。
+     */
     private List<String> findCandidates(String text, Pattern pattern, int limit, java.util.function.Predicate<String> predicate) {
         LinkedHashSet<String> results = new LinkedHashSet<>();
         Matcher matcher = pattern.matcher(text);
@@ -140,6 +180,12 @@ public class ChapterContextExtractor {
         return List.copyOf(results);
     }
 
+    /**
+     * 根据预置关键词识别章节中的冲突或悬念信号。
+     *
+     * @param text 待分析文本。
+     * @return 命中的冲突关键词列表。
+     */
     private List<String> findConflictSignals(String text) {
         LinkedHashSet<String> signals = new LinkedHashSet<>();
         String lowered = text.toLowerCase(Locale.ROOT);
@@ -154,6 +200,12 @@ public class ChapterContextExtractor {
         return List.copyOf(signals);
     }
 
+    /**
+     * 过滤明显不像人物名的正则命中结果。
+     *
+     * @param text 人物候选文本。
+     * @return true 表示可以作为人物候选进入上下文。
+     */
     private boolean isValidCharacterCandidate(String text) {
         if (text.length() < 2 || text.length() > 4) {
             return false;
@@ -164,10 +216,23 @@ public class ChapterContextExtractor {
         return !text.endsWith("说道") && !text.endsWith("问道");
     }
 
+    /**
+     * 过滤明显不像地点名的正则命中结果。
+     *
+     * @param text 地点候选文本。
+     * @return true 表示可以作为地点候选进入上下文。
+     */
     private boolean isValidLocationCandidate(String text) {
         return text.length() >= 2 && text.length() <= 10 && !text.contains("他们");
     }
 
+    /**
+     * 将候选项加入目标集合，并限制集合最大容量。
+     *
+     * @param target 目标去重集合。
+     * @param values 待加入候选项。
+     * @param limit 最大容量。
+     */
     private void addAllLimited(Set<String> target, List<String> values, int limit) {
         for (String value : values) {
             if (target.size() >= limit) {
@@ -177,14 +242,33 @@ public class ChapterContextExtractor {
         }
     }
 
+    /**
+     * 读取第一句非空文本。
+     *
+     * @param sentences 句子列表。
+     * @return 第一句；列表为空时返回空字符串。
+     */
     private String firstNonBlank(List<String> sentences) {
         return sentences.isEmpty() ? "" : sentences.get(0);
     }
 
+    /**
+     * 读取最后一句非空文本。
+     *
+     * @param sentences 句子列表。
+     * @return 最后一句；列表为空时返回空字符串。
+     */
     private String lastNonBlank(List<String> sentences) {
         return sentences.isEmpty() ? "" : sentences.get(sentences.size() - 1);
     }
 
+    /**
+     * 截断文本到指定长度，保留省略号提示。
+     *
+     * @param text 原始文本。
+     * @param maxLength 最大长度。
+     * @return 截断后的文本。
+     */
     private String clip(String text, int maxLength) {
         String normalized = safeText(text);
         if (normalized.length() <= maxLength) {
@@ -193,6 +277,12 @@ public class ChapterContextExtractor {
         return normalized.substring(0, maxLength) + "...";
     }
 
+    /**
+     * 将可空文本规范化为空字符串或去除首尾空白的文本。
+     *
+     * @param text 原始文本。
+     * @return 安全文本。
+     */
     private String safeText(String text) {
         return text == null ? "" : text.trim();
     }
