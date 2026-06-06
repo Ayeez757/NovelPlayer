@@ -1,0 +1,748 @@
+
+
+# 重构长篇小说生成链路：从“一次性全文生成”改为“多阶段、分块、可恢复的生成流水线”
+
+## 类型
+
+重构 / 架构调整 / 性能与稳定性改进
+
+## 背景
+
+当前 NovelPlayer 的目标是将 3 个章节以上的小说文本转换为可编辑的 YAML 剧本初稿。现有 MVP 已经完成了从小说输入、章节拆分、AI 生成、结构校验到 YAML 导出的完整闭环。
+
+但在真实使用场景中，小说文本往往非常长，章节数量多、上下文跨度大、人物关系复杂。当前实现采用“一次性把所有章节拼进 Prompt，并要求模型直接返回完整 `ScriptDocument`”的方式。这种方式适合验证产品原型，但不适合承载真实长篇小说改编。
+
+相关代码位置：
+
+- [ScriptPromptBuilder.java](D:/Develop/project/NovelPlayer/backend/src/main/java/com/novelplayer/ai/ScriptPromptBuilder.java:84)：将所有章节拼入同一个 Prompt。
+- [DeepSeekScriptAiClient.java](D:/Develop/project/NovelPlayer/backend/src/main/java/com/novelplayer/ai/DeepSeekScriptAiClient.java:55)：构造完整 Prompt 后单次调用模型。
+- [ScriptGenerationPipeline.java](D:/Develop/project/NovelPlayer/backend/src/main/java/com/novelplayer/application/generation/ScriptGenerationPipeline.java:47)：当前生成管线只有一次高层生成调用。
+- [GenerationJobService.java](D:/Develop/project/NovelPlayer/backend/src/main/java/com/novelplayer/application/generation/GenerationJobService.java:105)：同步执行完整生成流程。
+- [V1__init.sql](D:/Develop/project/NovelPlayer/backend/src/main/resources/db/migration/V1__init.sql:43)：已有 `generation_stage_result` 表，可作为多阶段生成的落库基础。
+
+## 当前问题
+
+### 1. 上下文过长，模型调用不可控
+
+当前 `ScriptPromptBuilder` 会把所有章节正文拼入一次 `userPrompt`。当小说篇幅增长时，Prompt 会迅速变得非常大，带来以下问题：
+
+- 超过模型上下文窗口限制。
+- 请求耗时显著增加。
+- Token 成本快速上升。
+- 模型越到后文越容易忽略前文细节。
+- 输出 JSON 体积过大，解析失败概率变高。
+
+### 2. 单次调用失败成本过高
+
+目前整本小说只有一次真实生成调用。如果模型超时、返回非法 JSON、网络失败或结构校验失败，整次任务都需要从头开始。
+
+这会导致：
+
+- 用户等待时间长。
+- 失败后没有可恢复进度。
+- 已经完成的局部生成结果无法复用。
+- 调试困难，只能看到最终失败，而不能定位哪个阶段出了问题。
+
+### 3. 生成职责过重
+
+当前模型一次性承担了太多任务：
+
+- 理解完整小说。
+- 识别人物和地点。
+- 提炼主线和主题。
+- 决定章节如何改编成场景。
+- 写出动作、对白、转场。
+- 保证所有 ID 引用正确。
+- 返回完整结构化 JSON。
+
+这会导致生成质量不稳定。模型既要做结构规划，又要写作正文，还要维护格式约束，容易顾此失彼。
+
+### 4. 长篇一致性难以保证
+
+长篇小说中的人物别名、关系变化、隐藏信息、伏笔和时间线都需要跨章节维护。一次性生成时，模型可能：
+
+- 混淆人物称呼。
+- 遗漏前文伏笔。
+- 提前暴露后文信息。
+- 让角色动机前后不一致。
+- 场景引用不存在的人物或地点 ID。
+
+### 5. 当前同步任务不适合长耗时生成
+
+`GenerationJobService.generate()` 当前是同步流程，并且在服务层内完成完整生成。长篇小说生成可能持续数分钟甚至更久，不适合以同步 HTTP 请求承载。
+
+## 起因分析
+
+当前实现的问题不是某个具体 bug，而是 MVP 阶段的实现策略遇到了真实数据规模。
+
+现有设计隐含了一个假设：
+
+> 小说文本可以在一次模型上下文内被完整理解，并且模型可以一次性返回最终剧本文档。
+
+这个假设在短文本或演示样例中成立，但在真实长篇小说场景中不成立。
+
+根本原因是：当前系统把“小说理解、结构规划、分场写作、格式校验、最终导出”压缩成了一次模型调用。
+
+实际更合理的方式应该是：让模型分阶段产出中间创作资产，由后端负责编排、落库、校验、合并和导出。
+
+## 为什么需要重构
+
+这次重构的目标不是简单优化 Prompt，而是调整生成链路的架构边界。
+
+需要重构的原因：
+
+1. 长篇小说无法可靠地通过单次模型调用完成。
+2. 用户需要可见进度，而不是长时间等待一个黑盒结果。
+3. 失败后应该能从失败阶段继续，而不是整本重跑。
+4. 人物、地点、场景 ID 应该由系统维护稳定性，不能完全依赖模型。
+5. 后续要支持按章节重生成、局部编辑、版本对比、人工确认人物表等能力，必须先有中间产物。
+6. 当前数据库已经预留了 `generation_stage_result`，适合演进为多阶段生成流水线。
+
+## 目标
+
+将当前“一次性全文生成完整剧本”的链路重构为：
+
+> 多阶段、分块、可恢复、可校验、可逐步落库的小说改编生成流水线。
+
+最终生成物仍然是现有的 `ScriptDocument` 和 YAML，但它不再由模型一次性生成，而是由多个中间阶段结果合并而来。
+
+## 非目标
+
+本 Issue 不要求一次性完成以下能力：
+
+- 不要求实现复杂向量数据库 RAG。
+- 不要求实现多人协同编辑。
+- 不要求引入完整消息队列系统。
+- 不要求重做前端编辑器。
+- 不要求改变最终 YAML schema。
+- 不要求废弃现有 `ScriptDocument`、`YamlExporter`、`ScriptSchemaValidator`。
+
+## 新的实现思路
+
+### 总体流程
+
+新的生成流程分为以下阶段：
+
+1. 创建生成任务。
+2. 章节摘要与事件抽取。
+3. 故事圣经生成。
+4. 场景规划。
+5. 分场剧本生成。
+6. 合并完整 `ScriptDocument`。
+7. 结构校验。
+8. YAML 导出。
+9. 保存最终文档。
+10. 更新任务状态。
+
+### 阶段一：章节摘要与事件抽取
+
+按章节，或按小批章节，对小说正文进行压缩理解。
+
+输入：
+
+- 项目标题。
+- 当前章节编号、标题、正文。
+- 用户生成选项。
+- 必要的输出契约。
+
+输出示例：
+
+```json
+{
+  "chapterIndex": 12,
+  "title": "旧书店",
+  "summary": "林安在旧书店发现父亲留下的信。",
+  "majorEvents": [
+    "林安进入旧书店",
+    "店主认出林安的母亲",
+    "林安发现父亲留下的信"
+  ],
+  "characters": [
+    {
+      "name": "林安",
+      "aliases": ["她", "林小姐"],
+      "roleHint": "protagonist",
+      "goalHint": "寻找父亲失踪真相"
+    }
+  ],
+  "locations": [
+    {
+      "name": "旧书店",
+      "type": "interior",
+      "description": "狭窄、潮湿、堆满旧报纸和绝版书"
+    }
+  ],
+  "conflicts": [
+    "林安想知道真相，店主却试图隐瞒"
+  ],
+  "openThreads": [
+    "父亲为什么留下这封信",
+    "店主为什么认识林安的母亲"
+  ],
+  "adaptationHints": [
+    "可将发现信件作为场景高潮"
+  ]
+}
+```
+
+要求：
+
+- 每章独立生成并落库。
+- 每章失败只重试该章。
+- 输入 hash 相同且已有成功结果时可以跳过。
+- 不在该阶段生成完整剧本对白。
+
+### 阶段二：故事圣经生成
+
+基于所有章节摘要，生成全局设定文件。
+
+内容包括：
+
+- 稳定人物表。
+- 稳定地点表。
+- 人物关系。
+- 主线剧情。
+- 重要伏笔。
+- 世界观规则。
+- 时间线约束。
+- 角色语言风格。
+- 不可提前泄露的信息。
+
+输出示例：
+
+```json
+{
+  "characters": [
+    {
+      "id": "char_001",
+      "name": "林安",
+      "aliases": ["她", "林小姐"],
+      "role": "protagonist",
+      "goal": "查清父亲失踪真相",
+      "traits": ["克制", "敏感", "行动力强"],
+      "voice": "短句为主，情绪压在动作里"
+    }
+  ],
+  "locations": [
+    {
+      "id": "loc_001",
+      "name": "旧书店",
+      "type": "interior",
+      "description": "主线线索首次显现的地点"
+    }
+  ],
+  "continuityRules": [
+    "林安在第 7 章之前不知道父亲的真实身份",
+    "店主不能主动说出全部真相"
+  ],
+  "mainPlot": "...",
+  "themes": ["选择", "真相", "关系裂变"]
+}
+```
+
+要求：
+
+- 人物和地点 ID 必须稳定。
+- 后端应参与 ID 分配与去重。
+- 后续所有场景必须引用该阶段的人物和地点 ID。
+- 允许后续阶段发现新增人物，但必须进入合并/修复流程。
+
+### 阶段三：场景规划
+
+基于章节摘要和故事圣经，生成剧本场景大纲。
+
+这个阶段只决定“怎么改编”，不写完整对白。
+
+输出示例：
+
+```json
+{
+  "scenes": [
+    {
+      "id": "scene_001",
+      "sourceChapters": [1],
+      "title": "雨夜来信",
+      "locationId": "loc_001",
+      "timeOfDay": "night",
+      "characters": ["char_001", "char_002"],
+      "dramaticPurpose": "让主角得到推动故事进入主线的线索",
+      "requiredBeats": [
+        "主角进入旧书店",
+        "店主回避父亲话题",
+        "主角发现信件"
+      ],
+      "summary": "林安在旧书店找到父亲留下的第一封信。"
+    }
+  ]
+}
+```
+
+要求：
+
+- 一个章节可以拆成多个场景。
+- 多个章节可以合并成一个场景。
+- 每个场景必须有 `sourceChapters`。
+- 每个场景必须引用已知人物和地点。
+- 场景 ID 由后端生成或校验。
+
+### 阶段四：分场剧本生成
+
+按场景逐个生成 `ScriptDocument.Scene`。
+
+每次模型输入只包含：
+
+- 当前场景计划。
+- 相关章节原文片段。
+- Story Bible 中相关人物和地点。
+- 前一个场景短摘要。
+- 必要的连续性规则。
+- 输出 JSON 契约。
+
+输出示例：
+
+```json
+{
+  "id": "scene_001",
+  "title": "雨夜来信",
+  "sourceChapters": [1],
+  "locationId": "loc_001",
+  "timeOfDay": "night",
+  "characters": ["char_001", "char_002"],
+  "dramaticPurpose": "让主角得到推动故事进入主线的线索",
+  "summary": "林安在旧书店找到父亲留下的第一封信。",
+  "blocks": [
+    {
+      "type": "action",
+      "text": "雨水顺着旧书店的玻璃门往下淌。林安推门进来，铃声干涩地响了一下。"
+    },
+    {
+      "type": "dialogue",
+      "speakerId": "char_001",
+      "text": "我想找一本旧书。也可能是一封信。"
+    }
+  ]
+}
+```
+
+要求：
+
+- 每个场景独立落库。
+- 单个场景失败不影响其他场景。
+- 支持重试单个场景。
+- 支持未来按场景重新生成。
+- 输出必须能映射到现有 `ScriptDocument.Scene`。
+
+### 阶段五：合并与校验
+
+后端负责将以下内容合并为最终 `ScriptDocument`：
+
+- Metadata
+- Adaptation
+- Characters
+- Locations
+- Scenes
+- RevisionNotes
+
+合并后继续使用现有：
+
+- `ScriptSchemaValidator`
+- `ScriptJsonMapper`
+- `YamlExporter`
+- `ScriptDocumentRepository`
+
+校验规则：
+
+- 所有 `scene.locationId` 必须存在于 `locations`。
+- 所有 `scene.characters` 必须存在于 `characters`。
+- 所有对白块 `speakerId` 必须存在于 `characters`。
+- `scene.id` 不能重复。
+- `sourceChapters` 不能为空。
+- `metadata.sourceChapterCount` 必须等于项目章节数。
+- 场景顺序必须稳定。
+
+## 数据模型建议
+
+### 短期方案
+
+复用现有 `generation_stage_result` 表，通过 `stage_name` 区分不同阶段：
+
+- `generation_input`
+- `chapter_digest:1`
+- `chapter_digest:2`
+- `story_bible`
+- `scene_plan`
+- `scene_draft:scene_001`
+- `scene_draft:scene_002`
+- `script_assembly`
+
+优点：
+
+- 改动小。
+- 能快速验证多阶段生成。
+- 已有实体 `GenerationStageResult` 可直接复用。
+
+缺点：
+
+- 查询不够方便。
+- 难以做复杂编辑。
+- 后续前端展示会越来越别扭。
+
+### 中期方案
+
+新增独立中间产物表：
+
+#### `chapter_digest`
+
+字段建议：
+
+- `id`
+- `project_id`
+- `job_id`
+- `chapter_index`
+- `input_hash`
+- `digest_json`
+- `status`
+- `error_message`
+- `created_at`
+- `updated_at`
+
+#### `story_bible`
+
+字段建议：
+
+- `id`
+- `project_id`
+- `job_id`
+- `input_hash`
+- `bible_json`
+- `status`
+- `created_at`
+- `updated_at`
+
+#### `scene_plan`
+
+字段建议：
+
+- `id`
+- `project_id`
+- `job_id`
+- `input_hash`
+- `plan_json`
+- `status`
+- `created_at`
+- `updated_at`
+
+#### `scene_draft`
+
+字段建议：
+
+- `id`
+- `project_id`
+- `job_id`
+- `scene_id`
+- `source_chapters`
+- `input_hash`
+- `scene_json`
+- `status`
+- `error_message`
+- `created_at`
+- `updated_at`
+
+## 服务设计建议
+
+新增或改造以下组件：
+
+### `ScriptGenerationPipeline`
+
+从当前单次调用改为编排多阶段：
+
+```java
+public ScriptDocument generate(NovelProject project, List<NovelChapter> chapters, GenerationOptions options) {
+    List<ChapterDigest> digests = chapterDigestGenerator.generate(project, chapters, options);
+    StoryBible bible = storyBibleGenerator.generate(project, digests, options);
+    ScenePlan plan = scenePlanner.generate(project, digests, bible, options);
+    List<Scene> scenes = sceneDraftGenerator.generate(project, chapters, bible, plan, options);
+    ScriptDocument document = scriptAssembler.assemble(project, bible, plan, scenes, options);
+
+    validator.validate(document);
+    return document;
+}
+```
+
+### 新增 AI 客户端方法
+
+当前 `ScriptAiClient` 只有：
+
+```java
+ScriptDocument generateScript(...)
+```
+
+建议拆成更细的能力：
+
+```java
+ChapterDigest generateChapterDigest(...);
+
+StoryBible generateStoryBible(...);
+
+ScenePlan generateScenePlan(...);
+
+Scene generateSceneDraft(...);
+
+Scene repairSceneDraft(...);
+```
+
+或者新增一个更通用的 `LlmJsonClient`，由各阶段服务负责 Prompt 构造和 JSON 映射。
+
+### 新增 Prompt Builder
+
+不要继续使用一个大 Prompt。应拆成：
+
+- `ChapterDigestPromptBuilder`
+- `StoryBiblePromptBuilder`
+- `ScenePlanPromptBuilder`
+- `SceneDraftPromptBuilder`
+- `SceneRepairPromptBuilder`
+
+每个 Prompt 只约束当前阶段的 JSON 输出。
+
+## 任务执行方式
+
+### 当前问题
+
+当前 `GenerationJobService.generate()` 是同步生成，不适合长耗时任务。
+
+### 建议改造
+
+生成接口改为：
+
+```http
+POST /api/projects/{projectId}/generation-jobs
+```
+
+立即返回：
+
+```json
+{
+  "jobId": 123,
+  "projectId": 1,
+  "status": "PENDING",
+  "currentStage": "generation_input"
+}
+```
+
+后台异步执行任务。
+
+查询接口：
+
+```http
+GET /api/generation-jobs/{jobId}
+```
+
+返回：
+
+```json
+{
+  "jobId": 123,
+  "projectId": 1,
+  "status": "RUNNING",
+  "currentStage": "scene_draft",
+  "progress": {
+    "total": 40,
+    "completed": 17,
+    "failed": 0
+  }
+}
+```
+
+后续可以扩展 SSE：
+
+```http
+GET /api/generation-jobs/{jobId}/events
+```
+
+## 前端影响
+
+前端需要从“点击生成后等待最终 YAML”改为“创建任务并展示进度”。
+
+建议展示阶段：
+
+- 准备生成
+- 正在分析章节：12 / 80
+- 正在整理人物与地点
+- 正在规划场景
+- 正在生成场景：17 / 45
+- 正在合并校验
+- 生成完成
+- 生成失败，可重试
+
+MVP 阶段前端可以先轮询 job 状态，不必立即做 SSE。
+
+## 具体实施步骤
+
+### 第一阶段：保守重构，保留最终输出
+
+- [ ] 保留现有 `ScriptDocument`、`YamlExporter`、`ScriptSchemaValidator`。
+- [ ] 新增章节摘要数据结构。
+- [ ] 新增章节摘要 Prompt。
+- [ ] 实现按章节生成 `ChapterDigest`。
+- [ ] 将章节摘要结果写入 `generation_stage_result`。
+- [ ] 支持章节摘要阶段失败重试。
+
+### 第二阶段：增加 Story Bible
+
+- [ ] 新增 `StoryBible` 数据结构。
+- [ ] 新增 Story Bible Prompt。
+- [ ] 基于所有章节摘要生成人物表、地点表、连续性规则。
+- [ ] 校验人物和地点 ID 稳定性。
+- [ ] 将 Story Bible 写入阶段结果。
+
+### 第三阶段：增加场景规划
+
+- [ ] 新增 `ScenePlan` 数据结构。
+- [ ] 新增场景规划 Prompt。
+- [ ] 基于章节摘要和 Story Bible 生成场景列表。
+- [ ] 校验每个场景的 `sourceChapters`、`characters`、`locationId`。
+- [ ] 将场景规划写入阶段结果。
+
+### 第四阶段：分场生成
+
+- [ ] 新增场景生成 Prompt。
+- [ ] 按场景逐个生成 `ScriptDocument.Scene`。
+- [ ] 每个场景单独保存阶段结果。
+- [ ] 支持单场景失败重试。
+- [ ] 支持跳过已成功且 input hash 未变化的场景。
+
+### 第五阶段：合并最终文档
+
+- [ ] 新增 `ScriptAssembler`。
+- [ ] 将 Story Bible、ScenePlan、SceneDraft 合并为 `ScriptDocument`。
+- [ ] 复用现有结构校验。
+- [ ] 复用现有 YAML 导出。
+- [ ] 保存最终 `script_document`。
+
+### 第六阶段：异步任务
+
+- [ ] 将生成接口改为创建任务并立即返回 `jobId`。
+- [ ] 后台执行生成流水线。
+- [ ] 更新 `GenerationJob.currentStage`。
+- [ ] 支持前端查询进度。
+- [ ] 失败时保留错误阶段和错误信息。
+
+## 验收标准
+
+### 功能验收
+
+- [ ] 用户提交 3 章小说后，仍然可以生成合法 YAML。
+- [ ] 用户提交 20 章以上小说时，系统不会将所有章节拼入单次模型调用。
+- [ ] 章节摘要阶段会为每章生成独立结果。
+- [ ] Story Bible 中存在稳定人物 ID 和地点 ID。
+- [ ] 场景规划结果中每个场景都有 `sourceChapters`。
+- [ ] 分场生成结果可以合并为完整 `ScriptDocument`。
+- [ ] 最终 YAML schema 与当前版本兼容。
+- [ ] 前端可以看到生成任务进度。
+- [ ] 任意中间阶段失败时，任务状态为 `FAILED`，并能看到失败阶段和错误信息。
+
+### 稳定性验收
+
+- [ ] 单个章节摘要失败时，不需要重跑已成功章节。
+- [ ] 单个场景生成失败时，不需要重跑已成功场景。
+- [ ] 相同输入 hash 的阶段结果可以复用。
+- [ ] 模型返回非法 JSON 时，该阶段失败信息会被保存。
+- [ ] 最终合并前会校验人物、地点、对白 speaker 引用。
+- [ ] 结构校验失败时不会保存 `VALID` 状态的最终文档。
+
+### 性能验收
+
+- [ ] 单次模型调用输入长度显著小于全文 Prompt。
+- [ ] 长篇小说生成可以分阶段持续推进，而不是长时间无反馈。
+- [ ] 后端 HTTP 请求不会等待完整生成结束。
+- [ ] 生成任务可以通过 job 状态查询当前进度。
+
+### 回归验收
+
+- [ ] 现有 mock AI 模式仍可运行。
+- [ ] 现有 YAML 导出测试仍通过。
+- [ ] 现有 `ScriptSchemaValidator` 测试仍通过。
+- [ ] 现有短文本生成流程行为不破坏。
+- [ ] 数据库迁移可以从旧版本平滑升级。
+
+## 测试建议
+
+### 单元测试
+
+- [ ] `ChapterDigestPromptBuilderTest`
+- [ ] `StoryBiblePromptBuilderTest`
+- [ ] `ScenePlanPromptBuilderTest`
+- [ ] `SceneDraftPromptBuilderTest`
+- [ ] `ScriptAssemblerTest`
+- [ ] `GenerationStageResult` 读写测试
+- [ ] input hash 稳定性测试
+- [ ] 场景引用校验测试
+
+### 集成测试
+
+- [ ] 3 章小说完整生成。
+- [ ] 10+ 章小说分阶段生成。
+- [ ] 中间某章摘要失败后任务失败。
+- [ ] 修复失败后可以从失败阶段继续。
+- [ ] 某个场景返回非法 speakerId 时校验失败。
+- [ ] 成功生成后可以读取最新 YAML。
+
+### Mock 测试
+
+Mock AI 需要支持多阶段输出，而不只是一次性返回完整 `ScriptDocument`。
+
+建议新增：
+
+- `MockChapterDigestGenerator`
+- `MockStoryBibleGenerator`
+- `MockScenePlanGenerator`
+- `MockSceneDraftGenerator`
+
+或者让 `MockScriptAiClient` 实现新的多阶段接口。
+
+## 风险
+
+### 风险一：阶段变多后实现复杂度上升
+
+缓解方式：
+
+- 先复用 `generation_stage_result`。
+- 先完成最小多阶段闭环。
+- 不急着引入向量数据库和复杂任务队列。
+
+### 风险二：分块生成导致风格不一致
+
+缓解方式：
+
+- 使用 Story Bible 统一人物、地点、风格。
+- 每个场景生成时带入相关连续性规则。
+- 增加最终连续性检查阶段。
+
+### 风险三：人物和地点去重不准确
+
+缓解方式：
+
+- 初期由模型提名，后端规则合并。
+- 后续增加人工确认人物表功能。
+- 保存 aliases，降低称呼不一致问题。
+
+### 风险四：异步任务引入状态复杂度
+
+缓解方式：
+
+- 初期只实现轮询。
+- `GenerationJob` 只维护粗粒度状态。
+- 详细阶段结果仍由 `generation_stage_result` 保存。
+
+## 完成定义
+
+当以下条件全部满足时，本 Issue 可关闭：
+
+- 系统不再依赖单次全文 Prompt 生成完整剧本。
+- 至少实现“章节摘要 → Story Bible → 场景规划 → 分场生成 → 合并导出”的完整链路。
+- 每个关键阶段结果都有持久化记录。
+- 生成任务可以异步执行并查询进度。
+- 失败时可以定位具体阶段。
+- 最终输出仍兼容现有 YAML schema。
+- 短篇与长篇输入都有测试覆盖。

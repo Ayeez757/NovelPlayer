@@ -146,7 +146,8 @@ Vite 开发服务器会把 `/api` 请求代理到 `http://localhost:8080`。
 Docker 部署配置放在项目根目录：
 
 ```text
-docker-compose.yml  定义 app、mysql、端口、volume、容器环境变量
+docker-compose.yml  定义 frontend、app、mysql、端口、volume、容器环境变量
+frontend/nginx.conf  nginx 静态资源托管和 /api 反向代理配置
 .env                Docker Compose 运行时读取的环境变量
 .env.example        环境变量示例
 ```
@@ -163,6 +164,7 @@ copy .env.example .env
 
 ```env
 SERVER_PORT=8080
+FRONTEND_HOST_PORT=8081
 SPRING_PROFILES_ACTIVE=test
 NOVEL_PLAYER_MINIMUM_CHAPTERS=3
 NOVEL_PLAYER_MOCK_AI=true
@@ -176,6 +178,7 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-v4-pro
 DEEPSEEK_TEMPERATURE=0.4
+MYSQL_HOST_PORT=3307
 MYSQL_DATABASE=novel_player
 MYSQL_USER=novel
 MYSQL_PASSWORD=novel_pass
@@ -191,8 +194,14 @@ docker compose up --build
 浏览器打开：
 
 ```text
-http://localhost:8080
+http://localhost:8081
 ```
+
+Docker Compose 会启动三个服务：
+
+- `frontend`：nginx 托管前端静态资源，并把 `/api` 反向代理到后端。
+- `app`：Spring Boot 后端，只在 Compose 网络内暴露 `8080`。
+- `mysql`：MySQL 数据库，默认映射到宿主机 `3307`。
 
 ## 接入 DeepSeek
 
