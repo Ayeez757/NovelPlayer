@@ -1,85 +1,67 @@
 package com.novelplayer.application.generation;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.novelplayer.domain.generation.GenerationJob;
-import com.novelplayer.domain.generation.GenerationStageResult;
-import com.novelplayer.domain.generation.GenerationStatus;
 import com.novelplayer.domain.project.NovelChapter;
 import com.novelplayer.domain.project.NovelProject;
-import com.novelplayer.infra.repository.GenerationStageResultRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.List;
 
 /**
- * 记录一次生成的输入参数快照，便于后续排查同一项目的不同生成结果。
+ * 记录一次生成任务的输入参数快照。
+ *
+ * <p>快照只保存可审计的生成参数和章节数量，不重复保存完整小说原文或内部提示词。</p>
  */
 @Component
 public class GenerationInputSnapshotRecorder {
 
     private static final Logger log = LoggerFactory.getLogger(GenerationInputSnapshotRecorder.class);
 
-    private static final String STAGE_NAME = "generation_input";
-
-    private final GenerationStageResultRepository stageResultRepository;
-    private final ObjectMapper objectMapper;
+    private final GenerationStageStore stageStore;
 
     /**
-     * 注入阶段结果仓储和 JSON 序列化器。
+     * 创建生成输入快照记录器。
      *
-     * @param stageResultRepository 阶段结果仓储。
-     * @param objectMapper JSON 序列化器。
+     * @param stageStore 统一的生成阶段结果存取层。
      */
-    public GenerationInputSnapshotRecorder(GenerationStageResultRepository stageResultRepository,
-                                           ObjectMapper objectMapper) {
-        this.stageResultRepository = stageResultRepository;
-        this.objectMapper = objectMapper;
+    public GenerationInputSnapshotRecorder(GenerationStageStore stageStore) {
+        this.stageStore = stageStore;
     }
 
     /**
-     * 保存生成输入快照。快照只保存参数和章节数量，不重复保存完整原文或内部提示词。
+     * 将本次生成输入条件记录为一个成功阶段结果。
      *
-     * @param job 生成任务。
+     * @param job 生成任务，必须已经持久化。
      * @param project 小说改编项目。
-     * @param chapters 本次参与生成的章节。
-     * @param options 生成选项。
+     * @param chapters 本次参与生成的章节列表。
+     * @param options 生成参数。
      */
     public void record(GenerationJob job, NovelProject project, List<NovelChapter> chapters, GenerationOptions options) {
-        // 只记录可审计的生成参数，不持久化完整 prompt，避免扩大原文和内部规则的暴露面。
+        log.debug("开始记录生成输入快照 jobId={} projectId={} chapterCount={} format={} tone={} hasAdditionalInstructions={}",
+                job.getId(), project.getId(), chapters.size(), options.format(), options.tone(),
+                options.hasAdditionalInstructions());
         GenerationInputSnapshot snapshot = GenerationInputSnapshot.from(project, chapters, options);
-        String snapshotJson = toJson(snapshot);
-        String inputHash = sha256(snapshotJson);
-        stageResultRepository.save(new GenerationStageResult(job, STAGE_NAME, GenerationStatus.SUCCEEDED,
-                inputHash, snapshotJson, null));
-        log.debug("Generation input snapshot recorded jobId={} projectId={} inputHash={} snapshotLength={}",
-                job.getId(), project.getId(), inputHash, snapshotJson.length());
+        String inputHash = stageStore.sha256OfJson(snapshot);
+        stageStore.saveSucceeded(job, GenerationStageNames.GENERATION_INPUT, inputHash, snapshot);
+        log.info("生成输入快照记录完成 jobId={} projectId={} chapterCount={} inputHash={}",
+                job.getId(), project.getId(), chapters.size(), inputHash);
     }
 
-    private String toJson(GenerationInputSnapshot snapshot) {
-        try {
-            return objectMapper.writeValueAsString(snapshot);
-        } catch (Exception exception) {
-            throw new IllegalStateException("Failed to serialize generation input snapshot", exception);
-        }
-    }
-
-    private static String sha256(String value) {
-        try {
-            // 输入摘要用于后续判断生成条件是否一致，不作为安全签名或鉴权凭据使用。
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 digest is not available", exception);
-        }
-    }
-
+    /**
+     * 生成输入快照的可审计数据结构。
+     *
+     * @param projectId 项目主键。
+     * @param title 作品标题。
+     * @param chapterCount 参与生成的章节数量。
+     * @param format 剧本形式。
+     * @param tone 整体风格。
+     * @param dialogueDensity 对白密度。
+     * @param narrationRetention 旁白保留度。
+     * @param hasAdditionalInstructions 是否包含用户补充要求。
+     * @param additionalInstructions 用户补充要求。
+     */
     private record GenerationInputSnapshot(
             Long projectId,
             String title,
@@ -91,6 +73,14 @@ public class GenerationInputSnapshotRecorder {
             boolean hasAdditionalInstructions,
             String additionalInstructions
     ) {
+        /**
+         * 从当前生成上下文构造输入快照。
+         *
+         * @param project 小说改编项目。
+         * @param chapters 本次参与生成的章节列表。
+         * @param options 生成参数。
+         * @return 可持久化的输入快照。
+         */
         private static GenerationInputSnapshot from(NovelProject project, List<NovelChapter> chapters,
                                                     GenerationOptions options) {
             return new GenerationInputSnapshot(

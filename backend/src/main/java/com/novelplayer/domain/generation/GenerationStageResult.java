@@ -81,6 +81,78 @@ public class GenerationStageResult {
     }
 
     /**
+     * 读取阶段结果主键。
+     *
+     * @return 阶段结果主键。
+     */
+    public Long getId() {
+        return id;
+    }
+
+    /**
+     * 读取阶段结果所属的生成任务。
+     *
+     * @return 生成任务实体。
+     */
+    public GenerationJob getJob() {
+        return job;
+    }
+
+    /**
+     * 读取阶段名称。
+     *
+     * @return 阶段名称。
+     */
+    public String getStageName() {
+        return stageName;
+    }
+
+    /**
+     * 读取阶段执行状态。
+     *
+     * @return 阶段执行状态。
+     */
+    public GenerationStatus getStatus() {
+        return status;
+    }
+
+    /**
+     * 读取阶段输入哈希。
+     *
+     * @return 阶段输入哈希；失败阶段可能为空。
+     */
+    public String getInputHash() {
+        return inputHash;
+    }
+
+    /**
+     * 读取阶段输出 JSON。
+     *
+     * @return 阶段输出 JSON；失败阶段通常为空。
+     */
+    public String getOutputJson() {
+        return outputJson;
+    }
+
+    /**
+     * 读取阶段失败原因。
+     *
+     * @return 失败原因；成功阶段为空。
+     */
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    /**
+     * 读取阶段结果创建时间。
+     *
+     * @return 创建时间。
+     */
+    public OffsetDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    /**
      * 首次持久化前记录阶段结果创建时间。
      */
     @PrePersist
