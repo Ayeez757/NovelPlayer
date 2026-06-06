@@ -18,6 +18,26 @@ public final class GenerationStageNames {
     public static final String GENERATION_INPUT = "generation_input";
 
     /**
+     * 剧本生成管线调度阶段。
+     */
+    public static final String SCRIPT_GENERATION = "script_generation";
+
+    /**
+     * 旧的一次性剧本生成阶段。
+     */
+    public static final String LEGACY_SCRIPT_GENERATION = "legacy_script_generation";
+
+    /**
+     * 多阶段剧本生成调度阶段。
+     */
+    public static final String STAGED_SCRIPT_GENERATION = "staged_script_generation";
+
+    /**
+     * 章节摘要聚合阶段，用于前端展示整组章节摘要进度。
+     */
+    public static final String CHAPTER_DIGEST = "chapter_digest";
+
+    /**
      * 故事圣经阶段。
      */
     public static final String STORY_BIBLE = "story_bible";
@@ -28,9 +48,29 @@ public final class GenerationStageNames {
     public static final String SCENE_PLAN = "scene_plan";
 
     /**
+     * 分场草稿聚合阶段，用于前端展示整组分场生成进度。
+     */
+    public static final String SCENE_DRAFT = "scene_draft";
+
+    /**
      * 最终剧本文档组装阶段。
      */
     public static final String SCRIPT_ASSEMBLY = "script_assembly";
+
+    /**
+     * 最终剧本文档 JSON 序列化阶段。
+     */
+    public static final String SERIALIZING_JSON = "serializing_json";
+
+    /**
+     * 最终 YAML 导出阶段。
+     */
+    public static final String EXPORTING_YAML = "exporting_yaml";
+
+    /**
+     * 最终剧本文档快照保存阶段。
+     */
+    public static final String SAVING_SNAPSHOT = "saving_snapshot";
 
     /**
      * 工具类不允许实例化。

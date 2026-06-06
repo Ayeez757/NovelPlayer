@@ -38,6 +38,7 @@ public class ScriptGenerationPipeline {
     private final ObjectProvider<SceneDraftGenerator> sceneDraftGeneratorProvider;
     private final ObjectProvider<ScriptAssembler> scriptAssemblerProvider;
     private final ScriptSchemaValidator validator;
+    private final ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider;
 
     /**
      * 注入旧生成客户端、阶段化生成组件提供器和最终结构校验器。
@@ -50,6 +51,7 @@ public class ScriptGenerationPipeline {
      * @param sceneDraftGeneratorProvider 分场草稿阶段生成器提供器。
      * @param scriptAssemblerProvider 最终剧本文档组装器提供器。
      * @param validator 剧本文档校验器。
+     * @param lifecycleServiceProvider 生成任务生命周期服务提供器。
      */
     public ScriptGenerationPipeline(NovelPlayerProperties properties,
                                     ScriptAiClient scriptAiClient,
@@ -58,7 +60,8 @@ public class ScriptGenerationPipeline {
                                     ObjectProvider<ScenePlanner> scenePlannerProvider,
                                     ObjectProvider<SceneDraftGenerator> sceneDraftGeneratorProvider,
                                     ObjectProvider<ScriptAssembler> scriptAssemblerProvider,
-                                    ScriptSchemaValidator validator) {
+                                    ScriptSchemaValidator validator,
+                                    ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider) {
         this.properties = properties;
         this.scriptAiClient = scriptAiClient;
         this.chapterDigestGeneratorProvider = chapterDigestGeneratorProvider;
@@ -67,6 +70,7 @@ public class ScriptGenerationPipeline {
         this.sceneDraftGeneratorProvider = sceneDraftGeneratorProvider;
         this.scriptAssemblerProvider = scriptAssemblerProvider;
         this.validator = validator;
+        this.lifecycleServiceProvider = lifecycleServiceProvider;
     }
 
     /**
@@ -105,7 +109,7 @@ public class ScriptGenerationPipeline {
      */
     private ScriptDocument generateLegacy(GenerationJob job, NovelProject project, List<NovelChapter> chapters,
                                           GenerationOptions options) {
-        job.moveToStage("legacy_script_generation");
+        moveToStage(job, GenerationStageNames.LEGACY_SCRIPT_GENERATION);
         log.info("使用旧的一次性剧本生成链路 jobId={} projectId={} chapterCount={}",
                 job.getId(), project.getId(), chapters.size());
         ScriptDocument document = scriptAiClient.generateScript(project, chapters, options);
@@ -128,31 +132,31 @@ public class ScriptGenerationPipeline {
      */
     private ScriptDocument generateStaged(GenerationJob job, NovelProject project, List<NovelChapter> chapters,
                                           GenerationOptions options) {
-        job.moveToStage("chapter_digest");
+        moveToStage(job, GenerationStageNames.CHAPTER_DIGEST);
         List<ChapterDigest> digests = requireStagedComponent(chapterDigestGeneratorProvider,
                 "ChapterDigestGenerator").generate(job, project, chapters, options);
         log.info("章节摘要阶段完成 jobId={} projectId={} digestCount={}",
                 job.getId(), project.getId(), digests.size());
 
-        job.moveToStage(GenerationStageNames.STORY_BIBLE);
+        moveToStage(job, GenerationStageNames.STORY_BIBLE);
         StoryBible bible = requireStagedComponent(storyBibleGeneratorProvider,
                 "StoryBibleGenerator").generate(job, project, digests, options);
         log.info("故事圣经阶段完成 jobId={} projectId={} characterCount={} locationCount={}",
                 job.getId(), project.getId(), bible.characters().size(), bible.locations().size());
 
-        job.moveToStage(GenerationStageNames.SCENE_PLAN);
+        moveToStage(job, GenerationStageNames.SCENE_PLAN);
         ScenePlan plan = requireStagedComponent(scenePlannerProvider,
                 "ScenePlanner").plan(job, project, digests, bible, options);
         log.info("场景规划阶段完成 jobId={} projectId={} sceneCount={}",
                 job.getId(), project.getId(), plan.scenes().size());
 
-        job.moveToStage("scene_draft");
+        moveToStage(job, GenerationStageNames.SCENE_DRAFT);
         List<SceneDraft> drafts = requireStagedComponent(sceneDraftGeneratorProvider,
                 "SceneDraftGenerator").generate(job, project, chapters, plan, bible, options);
         log.info("分场草稿阶段完成 jobId={} projectId={} draftCount={}",
                 job.getId(), project.getId(), drafts.size());
 
-        job.moveToStage(GenerationStageNames.SCRIPT_ASSEMBLY);
+        moveToStage(job, GenerationStageNames.SCRIPT_ASSEMBLY);
         ScriptDocument document = requireStagedComponent(scriptAssemblerProvider,
                 "ScriptAssembler").assembleDrafts(project, options, bible, plan, drafts);
         log.info("最终剧本文档组装完成 jobId={} projectId={} schemaVersion={} sceneCount={}",
@@ -180,6 +184,20 @@ public class ScriptGenerationPipeline {
                     + " is required when novel-player.generation.pipeline-mode=staged");
         }
         return component;
+    }
+
+    /**
+     * 更新当前任务阶段，并在异步执行时尽快提交到数据库。
+     *
+     * @param job 当前生成任务。
+     * @param stage 阶段名称。
+     */
+    private void moveToStage(GenerationJob job, String stage) {
+        job.moveToStage(stage);
+        GenerationJobLifecycleService lifecycleService = lifecycleServiceProvider.getIfAvailable();
+        if (lifecycleService != null && job.getId() != null) {
+            lifecycleService.moveToStage(job.getId(), stage);
+        }
     }
 
     /**

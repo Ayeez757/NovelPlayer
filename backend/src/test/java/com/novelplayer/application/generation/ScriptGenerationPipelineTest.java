@@ -74,6 +74,9 @@ class ScriptGenerationPipelineTest {
     @Mock
     private ScriptSchemaValidator validator;
 
+    @Mock
+    private ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider;
+
     @Test
     void orchestratesStagedGenerationAndValidatesFinalDocument() {
         ScriptGenerationPipeline pipeline = stagedPipeline();
@@ -129,7 +132,7 @@ class ScriptGenerationPipelineTest {
         ScriptDocument result = pipeline.generate(job, project, chapters, options);
 
         assertThat(result).isSameAs(document);
-        assertThat(job.getCurrentStage()).isEqualTo("legacy_script_generation");
+        assertThat(job.getCurrentStage()).isEqualTo(GenerationStageNames.LEGACY_SCRIPT_GENERATION);
         verify(scriptAiClient).generateScript(project, chapters, options);
         verify(validator).validate(document);
         verify(chapterDigestGeneratorProvider, never()).getIfAvailable();
@@ -172,7 +175,8 @@ class ScriptGenerationPipelineTest {
                 scenePlannerProvider,
                 sceneDraftGeneratorProvider,
                 scriptAssemblerProvider,
-                validator
+                validator,
+                lifecycleServiceProvider
         );
     }
 

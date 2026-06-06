@@ -35,11 +35,12 @@ export interface ScriptDocumentResponse {
   createdAt: string
 }
 
-export interface GenerationStreamEvent {
-  type: 'job_created' | 'progress' | 'completed' | 'error'
-  jobId: number | null
-  stage: string | null
-  message: string | null
-  error: string | null
-  script: ScriptDocumentResponse | null
+export interface GenerationJobResponse {
+  id: number
+  projectId: number
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+  currentStage: string
+  errorMessage: string | null
+  createdAt: string
+  finishedAt: string | null
 }

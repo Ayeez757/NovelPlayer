@@ -41,14 +41,15 @@ public class GenerationController {
      *
      * @param projectId 项目主键。
      * @param request 生成选项。
-     * @return 本次生成得到的剧本文档。
+     * @return 新创建的生成任务。
      */
-    @PostMapping("/projects/{projectId}/generate")
-    public ScriptDocumentResponse generate(@PathVariable Long projectId, @Valid @RequestBody GenerationRequest request) {
+    @PostMapping("/projects/{projectId}/generation-jobs")
+    public ResponseEntity<GenerationJobResponse> createGenerationJob(@PathVariable Long projectId,
+                                                                     @Valid @RequestBody GenerationRequest request) {
         // Controller 负责 DTO 到应用层对象的转换，避免应用服务依赖 Web 入参结构。
         GenerationOptions options = new GenerationOptions(request.format(), request.tone(),
                 request.dialogueDensity(), request.narrationRetention(), request.additionalInstructions());
-        return generationJobService.generate(projectId, options);
+        return ResponseEntity.accepted().body(generationJobService.createJob(projectId, options));
     }
 
     /**
@@ -57,8 +58,19 @@ public class GenerationController {
      * @param jobId 生成任务主键。
      * @return 任务状态、当前阶段和错误信息。
      */
-    @GetMapping("/jobs/{jobId}")
+    @GetMapping("/generation-jobs/{jobId}")
     public GenerationJobResponse getJob(@PathVariable Long jobId) {
+        return generationJobService.getJob(jobId);
+    }
+
+    /**
+     * 查询生成任务状态的旧路径兼容入口。
+     *
+     * @param jobId 生成任务主键。
+     * @return 任务状态、当前阶段和错误信息。
+     */
+    @GetMapping("/jobs/{jobId}")
+    public GenerationJobResponse getJobByLegacyPath(@PathVariable Long jobId) {
         return generationJobService.getJob(jobId);
     }
 
