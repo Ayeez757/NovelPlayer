@@ -47,7 +47,8 @@
   grid-template-columns: minmax(340px, 0.95fr) minmax(280px, 0.8fr) minmax(380px, 1.05fr);
   grid-template-areas:
     "text submit result"
-    "chapter stream result";
+    "chapter stream result"
+    "map map map";
   align-items: start;
 }
 
@@ -70,6 +71,10 @@
 
 .workspace-center.is-horizontal-compare [data-section-id='stream-log'] {
   grid-area: stream;
+}
+
+.workspace-center.is-horizontal-compare [data-section-id='structure-map'] {
+  grid-area: map;
 }
 
 .content-card--source {

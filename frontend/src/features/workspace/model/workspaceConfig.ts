@@ -6,6 +6,7 @@ export type SectionId =
   | 'confirm-submit'
   | 'identify-results'
   | 'stream-log'
+  | 'structure-map'
 
 export interface SectionMeta {
   id: SectionId
@@ -34,7 +35,8 @@ export const contentSections: SectionMeta[] = [
   { id: 'identify-chapters', label: '识别章节', hint: '执行章节切分' },
   { id: 'confirm-submit', label: '确认提交', hint: '确认改编设置' },
   { id: 'identify-results', label: 'YAML 结果', hint: '查看生成草稿' },
-  { id: 'stream-log', label: '生成日志', hint: '跟踪执行过程' }
+  { id: 'stream-log', label: '生成日志', hint: '跟踪执行过程' },
+  { id: 'structure-map', label: '结构树', hint: '浏览 YAML 层级结构' }
 ]
 
 export const pageTypeLabels: Record<PageType, string> = {

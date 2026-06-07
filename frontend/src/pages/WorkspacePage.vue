@@ -2,7 +2,7 @@
   <main class="workspace-shell">
     <header class="workspace-topbar">
       <section class="brand-banner">
-        <h1 style="color: #3b82f6;">NovelPlayer</h1><p>Play Your Novel.</p>
+        <h1 style="color: #3b82f6;">NovelPlayer</h1>
         <p>从小说原文到剧本草稿的改编工作台。</p>
       </section>
 
@@ -468,6 +468,35 @@
             </article>
           </div>
         </section>
+
+        <section
+          :ref="setSectionRef('structure-map')"
+          class="content-card content-card--yaml-map"
+          data-section-id="structure-map"
+        >
+          <div class="content-card__heading">
+            <div>
+              <p class="content-card__eyebrow">06</p>
+              <h2>结构树</h2>
+            </div>
+            <span class="content-card__meta">
+              {{ yamlDraft.trim() ? '随 YAML 实时同步' : '等待 YAML 初稿' }}
+            </span>
+          </div>
+
+          <p class="content-card__description">
+            把当前 YAML 草稿整理成树状结构，方便快速查看 metadata、人物、地点、场景和正文块层级。
+          </p>
+
+          <article class="result-panel result-panel--yaml-map">
+            <div class="result-panel__heading">
+              <h3>剧本结构导航</h3>
+              <span>{{ script ? '已绑定当前生成结果' : '也支持手动编辑后的 YAML' }}</span>
+            </div>
+
+            <YamlStructureTree :yaml-text="yamlDraft" />
+          </article>
+        </section>
       </div>
     </section>
   </main>
@@ -486,6 +515,7 @@ import {
 import ChapterList from '../features/workspace/components/ChapterList.vue'
 import GenerationProgress from '../features/workspace/components/GenerationProgress.vue'
 import ScriptYamlEditor from '../features/workspace/components/ScriptYamlEditor.vue'
+import YamlStructureTree from '../features/workspace/components/YamlStructureTree.vue'
 import { useWorkspacePage } from '../features/workspace/composables/useWorkspacePage'
 
 const {

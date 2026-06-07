@@ -146,7 +146,7 @@ export function useWorkspacePage() {
     }
 
     if (!supportsChapterSelectionSubmission) {
-      return '当前后端还没有章节选择入参，本次会默认按全部章节生成。'
+      return '当前会默认按全部章节生成。'
     }
 
     if (hasCustomChapterSelection.value) {

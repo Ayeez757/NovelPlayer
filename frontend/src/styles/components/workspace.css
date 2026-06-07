@@ -298,6 +298,12 @@
     linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
 }
 
+.content-card--yaml-map {
+  background:
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 26%),
+    linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
 .source-mode-panel {
   display: grid;
   gap: 18px;
@@ -564,6 +570,10 @@
 
 .result-panel--yaml .yaml-editor :deep(textarea) {
   min-height: 360px;
+}
+
+.result-panel--yaml-map {
+  overflow: hidden;
 }
 
 .yaml-download-button {
