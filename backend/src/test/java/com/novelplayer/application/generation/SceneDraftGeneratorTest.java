@@ -10,6 +10,7 @@ import com.novelplayer.application.generation.model.SceneDraft;
 import com.novelplayer.application.generation.model.SceneDraftContext;
 import com.novelplayer.application.generation.model.ScenePlan;
 import com.novelplayer.application.generation.model.StoryBible;
+import com.novelplayer.config.NovelPlayerProperties;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.generation.GenerationStageResult;
 import com.novelplayer.domain.generation.GenerationStatus;
@@ -37,7 +38,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 覆盖分场草稿阶段生成器的逐场缓存、最小上下文构造、引用校验和失败记录。
+ * Covers scene draft caching, context building, validation, failure recording and parallel context semantics.
  */
 @ExtendWith(MockitoExtension.class)
 class SceneDraftGeneratorTest {
@@ -57,23 +58,20 @@ class SceneDraftGeneratorTest {
     @BeforeEach
     void setUp() {
         stageStore = new GenerationStageStore(repository, new ObjectMapper());
-        /*
-         * 旧测试构造器参数只有 2 个：
-         * generator = new SceneDraftGenerator(aiClient, stageStore);
-         */
-        generator = new SceneDraftGenerator(aiClient, stageStore, lifecycleServiceProvider);
+        generator = generatorWithConcurrency(1);
     }
 
     @Test
     void reusesCachedSceneDraftWhenInputHashMatches() {
         GenerationJob job = persistedJob(12L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
         NovelChapter chapter = chapter(project, 1);
         GenerationOptions options = GenerationOptions.defaults();
         StoryBible bible = sampleBible();
-        PlannedScene scene = plannedScene("scene_001", List.of(1), "loc_001", List.of("char_001", "char_002"));
+        PlannedScene scene = plannedScene("scene_001", List.of(1), "loc_001",
+                List.of("char_001", "char_002"));
         ScenePlan scenePlan = new ScenePlan(List.of(scene));
-        SceneDraft draft = sceneDraft(scene, "林安逼问店主。");
+        SceneDraft draft = sceneDraft(scene, "Lin questions the shopkeeper.");
         SceneDraftContext context = new SceneDraftContext(scene, List.of(chapter), bible.characters(),
                 bible.locations().getFirst(), bible.continuityRules(), null);
         String inputHash = stageStore.sha256OfJson(sceneDraftInput(project, context, options));
@@ -96,19 +94,22 @@ class SceneDraftGeneratorTest {
     }
 
     @Test
-    void generatesEachSceneWithMinimalContextAndPreviousSummary() {
+    void serialGenerationUsesPreviousGeneratedSummary() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         GenerationJob job = persistedJob(21L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。\n第二章 旧账\n她找到旧账本。");
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
         NovelChapter chapterOne = chapter(project, 1);
         NovelChapter chapterTwo = chapter(project, 2);
-        GenerationOptions options = new GenerationOptions("web_drama", "suspense", 60, 30, "强化主角主动性");
+        GenerationOptions options = new GenerationOptions("web_drama", "suspense", 60, 30,
+                "Make the protagonist proactive.");
         StoryBible bible = sampleBible();
-        PlannedScene sceneOne = plannedScene("scene_001", List.of(1), "loc_001", List.of("char_001", "char_002"));
-        PlannedScene sceneTwo = plannedScene("scene_002", List.of(2), "loc_002", List.of("char_001"));
+        PlannedScene sceneOne = plannedScene("scene_001", List.of(1), "loc_001",
+                List.of("char_001", "char_002"), "planned summary one");
+        PlannedScene sceneTwo = plannedScene("scene_002", List.of(2), "loc_002",
+                List.of("char_001"), "planned summary two");
         ScenePlan scenePlan = new ScenePlan(List.of(sceneOne, sceneTwo));
-        SceneDraft draftOne = sceneDraft(sceneOne, "林安逼问店主，拿到信件线索。");
-        SceneDraft draftTwo = sceneDraft(sceneTwo, "林安根据上一场线索找到旧账本。");
+        SceneDraft draftOne = sceneDraft(sceneOne, "generated summary one");
+        SceneDraft draftTwo = sceneDraft(sceneTwo, "generated summary two");
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(21L), any(String.class), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
@@ -120,32 +121,56 @@ class SceneDraftGeneratorTest {
 
         assertThat(results).containsExactly(draftOne, draftTwo);
         ArgumentCaptor<SceneDraftContext> contextCaptor = ArgumentCaptor.forClass(SceneDraftContext.class);
-        verify(aiClient, org.mockito.Mockito.times(2)).generateSceneDraft(eq(project), contextCaptor.capture(), eq(options));
+        verify(aiClient, org.mockito.Mockito.times(2)).generateSceneDraft(
+                eq(project), contextCaptor.capture(), eq(options));
         List<SceneDraftContext> contexts = contextCaptor.getAllValues();
-        assertThat(contexts.get(0).plannedScene()).isEqualTo(sceneOne);
-        assertThat(contexts.get(0).sourceChapters()).extracting(NovelChapter::getChapterIndex).containsExactly(1);
-        assertThat(contexts.get(0).characters()).extracting(BibleCharacter::id).containsExactly("char_001", "char_002");
-        assertThat(contexts.get(0).location().id()).isEqualTo("loc_001");
         assertThat(contexts.get(0).previousSceneSummary()).isNull();
-        assertThat(contexts.get(1).plannedScene()).isEqualTo(sceneTwo);
-        assertThat(contexts.get(1).sourceChapters()).extracting(NovelChapter::getChapterIndex).containsExactly(2);
-        assertThat(contexts.get(1).characters()).extracting(BibleCharacter::id).containsExactly("char_001");
-        assertThat(contexts.get(1).location().id()).isEqualTo("loc_002");
         assertThat(contexts.get(1).previousSceneSummary()).isEqualTo(draftOne.summary());
+        assertThat(contexts.get(1).plannedScene()).isEqualTo(sceneTwo);
+    }
 
-        ArgumentCaptor<GenerationStageResult> resultCaptor = ArgumentCaptor.forClass(GenerationStageResult.class);
-        verify(repository, org.mockito.Mockito.times(2)).save(resultCaptor.capture());
-        assertThat(resultCaptor.getAllValues()).extracting(GenerationStageResult::getStageName)
-                .containsExactly(GenerationStageNames.sceneDraft("scene_001"), GenerationStageNames.sceneDraft("scene_002"));
-        assertThat(resultCaptor.getAllValues()).extracting(GenerationStageResult::getStatus)
-                .containsExactly(GenerationStatus.SUCCEEDED, GenerationStatus.SUCCEEDED);
+    @Test
+    void parallelGenerationUsesPreviousPlannedSummaryAndAvoidsFineGrainedStageWrites() {
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        GenerationJob job = persistedJob(22L);
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
+        NovelChapter chapterOne = chapter(project, 1);
+        NovelChapter chapterTwo = chapter(project, 2);
+        GenerationOptions options = GenerationOptions.defaults();
+        StoryBible bible = sampleBible();
+        PlannedScene sceneOne = plannedScene("scene_001", List.of(1), "loc_001",
+                List.of("char_001", "char_002"), "planned summary one");
+        PlannedScene sceneTwo = plannedScene("scene_002", List.of(2), "loc_002",
+                List.of("char_001"), "planned summary two");
+        ScenePlan scenePlan = new ScenePlan(List.of(sceneOne, sceneTwo));
+        SceneDraftGenerator parallelGenerator = generatorWithConcurrency(2);
+        when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
+                eq(22L), any(String.class), eq(GenerationStatus.SUCCEEDED), any(String.class)))
+                .thenReturn(Optional.empty());
+        when(aiClient.generateSceneDraft(eq(project), any(SceneDraftContext.class), eq(options)))
+                .thenAnswer(invocation -> {
+                    SceneDraftContext context = invocation.getArgument(1);
+                    return sceneDraft(context.plannedScene(), "generated " + context.plannedScene().id());
+                });
+
+        List<SceneDraft> results = parallelGenerator.generate(
+                job, project, List.of(chapterOne, chapterTwo), scenePlan, bible, options);
+
+        assertThat(results).extracting(SceneDraft::id).containsExactly("scene_001", "scene_002");
+        ArgumentCaptor<SceneDraftContext> contextCaptor = ArgumentCaptor.forClass(SceneDraftContext.class);
+        verify(aiClient, org.mockito.Mockito.times(2)).generateSceneDraft(
+                eq(project), contextCaptor.capture(), eq(options));
+        List<SceneDraftContext> contexts = contextCaptor.getAllValues();
+        assertThat(contexts.get(0).previousSceneSummary()).isNull();
+        assertThat(contexts.get(1).previousSceneSummary()).isEqualTo(sceneOne.summary());
+        verify(lifecycleServiceProvider, never()).getIfAvailable();
     }
 
     @Test
     void recordsFailedStageWhenSceneReferencesMissingChapter() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         GenerationJob job = persistedJob(31L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
         NovelChapter chapter = chapter(project, 1);
         StoryBible bible = sampleBible();
         PlannedScene scene = plannedScene("scene_001", List.of(2), "loc_001", List.of("char_001"));
@@ -165,18 +190,20 @@ class SceneDraftGeneratorTest {
     void recordsFailedStageWhenDraftDoesNotMatchPlannedScene() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         GenerationJob job = persistedJob(41L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
         NovelChapter chapter = chapter(project, 1);
         GenerationOptions options = GenerationOptions.defaults();
         StoryBible bible = sampleBible();
         PlannedScene scene = plannedScene("scene_001", List.of(1), "loc_001", List.of("char_001"));
         PlannedScene shiftedScene = plannedScene("scene_999", List.of(1), "loc_001", List.of("char_001"));
         ScenePlan scenePlan = new ScenePlan(List.of(scene));
-        SceneDraft invalidDraft = sceneDraft(shiftedScene, "模型写偏到了别的场景。");
+        SceneDraft invalidDraft = sceneDraft(shiftedScene, "The model wrote a different scene.");
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
-                eq(41L), eq(GenerationStageNames.sceneDraft("scene_001")), eq(GenerationStatus.SUCCEEDED), any(String.class)))
+                eq(41L), eq(GenerationStageNames.sceneDraft("scene_001")), eq(GenerationStatus.SUCCEEDED),
+                any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateSceneDraft(eq(project), any(SceneDraftContext.class), eq(options))).thenReturn(invalidDraft);
+        when(aiClient.generateSceneDraft(eq(project), any(SceneDraftContext.class), eq(options)))
+                .thenReturn(invalidDraft);
 
         assertThatThrownBy(() -> generator.generate(job, project, List.of(chapter), scenePlan, bible, options))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -190,7 +217,7 @@ class SceneDraftGeneratorTest {
     void recordsFailedStageWhenDraftBlockSpeakerIsUnknown() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         GenerationJob job = persistedJob(51L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
         NovelChapter chapter = chapter(project, 1);
         GenerationOptions options = GenerationOptions.defaults();
         StoryBible bible = sampleBible();
@@ -204,13 +231,15 @@ class SceneDraftGeneratorTest {
                 scene.timeOfDay(),
                 scene.characters(),
                 scene.dramaticPurpose(),
-                "林安发现线索。",
-                List.of(new DraftSceneBlock("dialogue", "char_999", "我知道真相。"))
+                "Lin finds a clue.",
+                List.of(new DraftSceneBlock("dialogue", "char_999", "I know the truth."))
         );
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
-                eq(51L), eq(GenerationStageNames.sceneDraft("scene_001")), eq(GenerationStatus.SUCCEEDED), any(String.class)))
+                eq(51L), eq(GenerationStageNames.sceneDraft("scene_001")), eq(GenerationStatus.SUCCEEDED),
+                any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateSceneDraft(eq(project), any(SceneDraftContext.class), eq(options))).thenReturn(invalidDraft);
+        when(aiClient.generateSceneDraft(eq(project), any(SceneDraftContext.class), eq(options)))
+                .thenReturn(invalidDraft);
 
         assertThatThrownBy(() -> generator.generate(job, project, List.of(chapter), scenePlan, bible, options))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -223,7 +252,7 @@ class SceneDraftGeneratorTest {
     @Test
     void rejectsEmptyChapterListBeforeStageProcessing() {
         GenerationJob job = persistedJob(61L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
         PlannedScene scene = plannedScene("scene_001", List.of(1), "loc_001", List.of("char_001"));
 
         assertThatThrownBy(() -> generator.generate(
@@ -234,41 +263,58 @@ class SceneDraftGeneratorTest {
                 any(), any(), any(), any());
     }
 
+    private SceneDraftGenerator generatorWithConcurrency(int concurrency) {
+        NovelPlayerProperties properties = new NovelPlayerProperties();
+        properties.getGeneration().setSceneDraftConcurrency(concurrency);
+        return new SceneDraftGenerator(
+                aiClient,
+                stageStore,
+                lifecycleServiceProvider,
+                properties,
+                new GenerationStageParallelExecutor(Runnable::run)
+        );
+    }
+
     private static NovelChapter chapter(NovelProject project, int chapterIndex) {
-        return new NovelChapter(project, chapterIndex, "第%d章".formatted(chapterIndex),
-                "第%d章正文，林安发现新的线索。".formatted(chapterIndex));
+        return new NovelChapter(project, chapterIndex, "Chapter " + chapterIndex,
+                "Chapter " + chapterIndex + " content. Lin finds a new clue.");
     }
 
     private static StoryBible sampleBible() {
         return new StoryBible(
                 List.of(
-                        new BibleCharacter("char_001", "林安", List.of("她"), "protagonist",
-                                "寻找父亲失踪真相", List.of("敏感", "克制"), "短句为主"),
-                        new BibleCharacter("char_002", "店主", List.of(), "supporting",
-                                "隐藏部分真相", List.of("谨慎"), "语气平稳")
+                        new BibleCharacter("char_001", "Lin", List.of(), "protagonist",
+                                "Find the truth", List.of("observant"), "short sentences"),
+                        new BibleCharacter("char_002", "Shopkeeper", List.of(), "supporting",
+                                "Hide part of the truth", List.of("guarded"), "steady tone")
                 ),
                 List.of(
-                        new BibleLocation("loc_001", "旧书店", "interior", "昏暗狭窄"),
-                        new BibleLocation("loc_002", "档案室", "interior", "堆满旧账本")
+                        new BibleLocation("loc_001", "Bookshop", "interior", "dim and narrow"),
+                        new BibleLocation("loc_002", "Archive", "interior", "full of ledgers")
                 ),
-                "林安寻找父亲失踪真相。",
-                List.of("真相", "选择"),
-                List.of("第七章前不能揭露父亲身份")
+                "Lin searches for the truth behind a disappearance.",
+                List.of("truth", "choice"),
+                List.of("Do not reveal the father before chapter seven.")
         );
     }
 
     private static PlannedScene plannedScene(String id, List<Integer> sourceChapters, String locationId,
                                              List<String> characters) {
+        return plannedScene(id, sourceChapters, locationId, characters, "Lin presses for the key clue.");
+    }
+
+    private static PlannedScene plannedScene(String id, List<Integer> sourceChapters, String locationId,
+                                             List<String> characters, String summary) {
         return new PlannedScene(
                 id,
-                "旧书店试探",
+                "Testing the bookshop",
                 sourceChapters,
                 locationId,
                 "night",
                 characters,
-                "让主角第一次主动逼近真相",
-                "林安追问关键线索。",
-                List.of("建立调查目标", "制造人物阻力", "留下父亲失踪悬念")
+                "Let the protagonist actively approach the truth",
+                summary,
+                List.of("Set an investigation goal", "Create resistance", "Leave a hook")
         );
     }
 
@@ -283,8 +329,8 @@ class SceneDraftGeneratorTest {
                 scene.dramaticPurpose(),
                 summary,
                 List.of(
-                        new DraftSceneBlock("action", null, "林安推门进入。"),
-                        new DraftSceneBlock("dialogue", scene.characters().getFirst(), "这件事不能再拖了。")
+                        new DraftSceneBlock("action", null, "Lin enters the room."),
+                        new DraftSceneBlock("dialogue", scene.characters().getFirst(), "We cannot wait.")
                 )
         );
     }

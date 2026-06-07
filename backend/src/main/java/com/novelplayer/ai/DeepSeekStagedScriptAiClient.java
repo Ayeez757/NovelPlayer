@@ -47,15 +47,26 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
             Every required field must be present and non-blank.
             Reuse only ids and references that already exist in the input context.
             """;
+    private static final String STAGED_RETRY_SYSTEM_PROMPT = """
+            You are correcting a failed structured fiction adaptation response.
+            Return one strict JSON object only.
+            Use double quotes for all object keys and string values.
+            Do not output markdown fences, explanations, comments, trailing commas, or extra prose.
+            Every required field must be present and non-blank.
+            """;
+    private static final int RESPONSE_PREVIEW_LIMIT = 700;
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final DeepSeekJsonExtractor jsonExtractor;
+    private final DeepSeekChatOptionsFactory chatOptionsFactory;
 
-    public DeepSeekStagedScriptAiClient(ChatClient.Builder chatClientBuilder, ObjectMapper objectMapper) {
+    public DeepSeekStagedScriptAiClient(ChatClient.Builder chatClientBuilder, ObjectMapper objectMapper,
+                                        DeepSeekChatOptionsFactory chatOptionsFactory) {
         this.chatClient = chatClientBuilder.build();
         this.objectMapper = objectMapper;
         this.jsonExtractor = new DeepSeekJsonExtractor(objectMapper);
+        this.chatOptionsFactory = chatOptionsFactory;
     }
 
     @Override
@@ -169,20 +180,54 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
     }
 
     private ObjectNode requestStageJson(String stageName, NovelProject project, String userPrompt) {
+        String content = requestStageContent(project, stageName, "initial", STAGED_SYSTEM_PROMPT, userPrompt);
+        try {
+            return jsonExtractor.extractObject(content, stageName);
+        } catch (Exception firstException) {
+            log.warn("DeepSeek staged response is not parseable projectId={} stage={} attempt=initial preview={}",
+                    project.getId(), stageName, preview(content), firstException);
+            return retryStageJson(stageName, project, userPrompt, firstException);
+        }
+    }
+
+    private ObjectNode retryStageJson(String stageName, NovelProject project, String originalPrompt,
+                                      Exception firstException) {
+        String retryPrompt = """
+                The previous response for stage "%s" was not valid JSON.
+                Re-run the same task and return one strict JSON object only.
+                Requirements:
+                - Use double quotes for all object keys and string values.
+                - Do not include markdown fences, comments, explanations, or trailing commas.
+                - Do not include any text before or after the JSON object.
+
+                Original task:
+                %s
+                """.formatted(stageName, originalPrompt);
+        String content = requestStageContent(project, stageName, "retry", STAGED_RETRY_SYSTEM_PROMPT, retryPrompt);
+        try {
+            return jsonExtractor.extractObject(content, stageName);
+        } catch (Exception secondException) {
+            log.warn("DeepSeek staged response is not parseable projectId={} stage={} attempt=retry preview={}",
+                    project.getId(), stageName, preview(content), secondException);
+            IllegalStateException failure = new IllegalStateException(
+                    "DeepSeek staged response is not valid JSON for " + stageName, secondException);
+            failure.addSuppressed(firstException);
+            throw failure;
+        }
+    }
+
+    private String requestStageContent(NovelProject project, String stageName, String attempt, String systemPrompt,
+                                       String userPrompt) {
         long startedAt = System.nanoTime();
-        String content = chatClient.prompt()
-                .system(STAGED_SYSTEM_PROMPT)
-                .user(userPrompt)
+        String content = chatOptionsFactory.apply(chatClient.prompt()
+                        .system(systemPrompt)
+                        .user(userPrompt))
                 .call()
                 .content();
         long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
-        log.info("DeepSeek staged response received projectId={} stage={} responseLength={} elapsedMs={}",
-                project.getId(), stageName, content == null ? 0 : content.length(), elapsedMs);
-        try {
-            return jsonExtractor.extractObject(content, stageName);
-        } catch (Exception exception) {
-            throw new IllegalStateException("DeepSeek staged response is not valid JSON for " + stageName, exception);
-        }
+        log.info("DeepSeek staged response received projectId={} stage={} attempt={} responseLength={} elapsedMs={}",
+                project.getId(), stageName, attempt, content == null ? 0 : content.length(), elapsedMs);
+        return content;
     }
 
     private <T> T treeToValue(String stageName, ObjectNode root, Class<T> type) {
@@ -507,6 +552,21 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
             return normalized;
         }
         return normalized.substring(0, maxLength) + "...";
+    }
+
+    private String preview(String content) {
+        if (content == null) {
+            return "<null>";
+        }
+        String normalized = content
+                .replace('\r', ' ')
+                .replace('\n', ' ')
+                .replace('\t', ' ')
+                .strip();
+        if (normalized.length() <= RESPONSE_PREVIEW_LIMIT) {
+            return normalized;
+        }
+        return normalized.substring(0, RESPONSE_PREVIEW_LIMIT) + "...";
     }
 
     private String toJson(Object value) {

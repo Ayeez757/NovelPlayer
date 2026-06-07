@@ -2,7 +2,9 @@ package com.novelplayer.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.core.json.JsonReadFeature;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -46,9 +48,23 @@ final class DeepSeekJsonExtractor {
     );
 
     private final ObjectMapper objectMapper;
+    private final ObjectMapper lenientObjectMapper;
 
     DeepSeekJsonExtractor(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+        /*
+         * LLMs occasionally return almost-JSON even when the prompt asks for strict JSON:
+         * single quotes, unquoted field names, comments, or a trailing comma in arrays/objects.
+         * We still parse into JsonNode only, so a small, local lenient mapper improves recovery
+         * without weakening the application's normal ObjectMapper configuration.
+         */
+        this.lenientObjectMapper = JsonMapper.builder()
+                .enable(JsonReadFeature.ALLOW_SINGLE_QUOTES)
+                .enable(JsonReadFeature.ALLOW_UNQUOTED_FIELD_NAMES)
+                .enable(JsonReadFeature.ALLOW_JAVA_COMMENTS)
+                .enable(JsonReadFeature.ALLOW_TRAILING_COMMA)
+                .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+                .build();
     }
 
     ObjectNode extractObject(String content, String stageName) {
@@ -76,12 +92,19 @@ final class DeepSeekJsonExtractor {
                                 List<JsonObjectCandidate> candidates) {
         String candidate = content.substring(start, end + 1);
         try {
-            JsonNode node = objectMapper.readTree(candidate);
-            if (node instanceof ObjectNode objectNode) {
-                candidates.add(new JsonObjectCandidate(objectNode, start, score(stageName, objectNode)));
-            }
+            addCandidate(objectMapper.readTree(candidate), start, stageName, candidates);
         } catch (Exception ignored) {
-            // DeepSeek can include explanatory snippets or malformed scratch JSON before the final object.
+            try {
+                addCandidate(lenientObjectMapper.readTree(candidate), start, stageName, candidates);
+            } catch (Exception ignoredAgain) {
+                // DeepSeek can include explanatory snippets or malformed scratch JSON before the final object.
+            }
+        }
+    }
+
+    private void addCandidate(JsonNode node, int start, String stageName, List<JsonObjectCandidate> candidates) {
+        if (node instanceof ObjectNode objectNode) {
+            candidates.add(new JsonObjectCandidate(objectNode, start, score(stageName, objectNode)));
         }
     }
 

@@ -27,6 +27,7 @@ public class DeepSeekScriptAiClient implements ScriptAiClient {
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final ScriptPromptBuilder promptBuilder;
+    private final DeepSeekChatOptionsFactory chatOptionsFactory;
 
     /**
      * 创建真实模型客户端。
@@ -36,10 +37,12 @@ public class DeepSeekScriptAiClient implements ScriptAiClient {
      * @param promptBuilder 剧本提示词构建器。
      */
     public DeepSeekScriptAiClient(ChatClient.Builder chatClientBuilder, ObjectMapper objectMapper,
-                                  ScriptPromptBuilder promptBuilder) {
+                                  ScriptPromptBuilder promptBuilder,
+                                  DeepSeekChatOptionsFactory chatOptionsFactory) {
         this.chatClient = chatClientBuilder.build();
         this.objectMapper = objectMapper;
         this.promptBuilder = promptBuilder;
+        this.chatOptionsFactory = chatOptionsFactory;
     }
 
     /**
@@ -58,9 +61,9 @@ public class DeepSeekScriptAiClient implements ScriptAiClient {
                 project.getId(), chapters.size(), prompt.systemPrompt().length(), prompt.userPrompt().length(),
                 options.hasAdditionalInstructions());
         // system prompt 只约束输出协议，具体作品信息和章节内容放在 user prompt。
-        String content = chatClient.prompt()
-                .system(prompt.systemPrompt())
-                .user(prompt.userPrompt())
+        String content = chatOptionsFactory.apply(chatClient.prompt()
+                        .system(prompt.systemPrompt())
+                        .user(prompt.userPrompt()))
                 .call()
                 .content();
         long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
