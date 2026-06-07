@@ -1,5 +1,5 @@
 demo视频：通过百度网盘分享的文件：NovelPlayer.mp4
-链接: https://pan.baidu.com/s/13olLSZLyOVAO2mbNHSlYoA?pwd=kaya 提取码: kaya 
+链接: https://pan.baidu.com/s/1iWHXpoU23md3rKz6eXeavQ?pwd=kaya 提取码: kaya 
 
 # NovelPlayer
 
