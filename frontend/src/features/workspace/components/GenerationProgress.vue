@@ -54,7 +54,8 @@ const stageLabels: Record<string, string> = {
   staged_script_generation: '多阶段生成',
   legacy_script_generation: '旧链路生成',
   chapter_digest: '章节摘要',
-  story_bible: '故事圣经',
+  // 只改前端展示文案，内部阶段名 story_bible 保持不变，避免扩大后端改动面。
+  story_bible: '故事设定集',
   scene_plan: '场景规划',
   scene_draft: '分场草稿',
   script_assembly: '最终组装',

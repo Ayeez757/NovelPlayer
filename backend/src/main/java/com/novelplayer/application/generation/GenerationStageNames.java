@@ -38,7 +38,7 @@ public final class GenerationStageNames {
     public static final String CHAPTER_DIGEST = "chapter_digest";
 
     /**
-     * 故事圣经阶段。
+     * 故事设定集阶段。
      */
     public static final String STORY_BIBLE = "story_bible";
 

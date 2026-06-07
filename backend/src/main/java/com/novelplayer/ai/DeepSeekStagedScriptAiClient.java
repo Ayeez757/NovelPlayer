@@ -41,11 +41,14 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
     private static final Logger log = LoggerFactory.getLogger(DeepSeekStagedScriptAiClient.class);
 
     private static final String STAGED_SYSTEM_PROMPT = """
-            You are a structured fiction adaptation assistant.
-            Return JSON only.
-            Do not output markdown fences, explanations, or extra prose.
-            Every required field must be present and non-blank.
-            Reuse only ids and references that already exist in the input context.
+            你是一个中文小说改编结构化生成助手。
+            你只能返回一个合法 JSON 对象。
+            不要输出 Markdown 代码块，不要输出解释，不要输出 JSON 之外的任何文字。
+            所有自然语言内容字段必须使用简体中文输出，并且语言风格要与输入原文一致。
+            所有必填字段都必须存在且不能为空。
+            只能复用输入上下文里已经出现的人物、地点、章节和场景引用，不允许杜撰新的引用编号。
+            JSON 的键名、结构字段名、id、speakerId、locationId、sceneId 这类结构字段保持约定格式；
+            但标题、摘要、正文、主题、冲突、悬念、说明等自然语言字段必须是中文。
             """;
 
     private final ChatClient chatClient;
@@ -59,14 +62,17 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
     @Override
     public ChapterDigest generateChapterDigest(NovelProject project, NovelChapter chapter, GenerationOptions options) {
         String userPrompt = """
-                Task: generate one ChapterDigest from a single novel chapter.
-                Output rules:
-                - Return one JSON object only.
-                - chapterIndex must equal the input chapterIndex.
-                - title and summary must be non-blank.
-                - majorEvents / characters / locations / conflicts / openThreads / adaptationHints must be arrays.
-                - If uncertain, keep arrays empty instead of omitting them.
-                Input:
+                任务：根据单章中文小说内容生成一个 ChapterDigest。
+                输出要求：
+                - 只返回一个 JSON 对象。
+                - chapterIndex 必须与输入章节编号一致。
+                - title 和 summary 必须是非空简体中文。
+                - majorEvents / conflicts / openThreads / adaptationHints 必须是中文字符串数组。
+                - characters 必须是 CharacterMention 对象数组。
+                - locations 必须是 LocationMention 对象数组。
+                - 如果不确定，可以返回空数组，但不要省略字段。
+                - 所有自然语言字段都必须使用简体中文。
+                输入上下文：
                 %s
                 """.formatted(toJson(new ChapterDigestPromptInput(
                 project.getTitle(),
@@ -83,14 +89,16 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
     public StoryBible generateStoryBible(NovelProject project, List<ChapterDigest> chapterDigests,
                                          GenerationOptions options) {
         String userPrompt = """
-                Task: generate one StoryBible from chapter digests.
-                Output rules:
-                - Return one JSON object only.
-                - characters and locations must be non-empty arrays.
-                - mainPlot must be non-blank.
-                - character ids must use char_001 style.
-                - location ids must use loc_001 style.
-                Input:
+                任务：根据章节摘要生成一个 StoryBible。
+                输出要求：
+                - 只返回一个 JSON 对象。
+                - characters 和 locations 必须是非空数组。
+                - mainPlot 必须是非空简体中文。
+                - themes 和 continuityRules 必须是中文字符串数组。
+                - character id 必须使用 char_001 这种格式。
+                - location id 必须使用 loc_001 这种格式。
+                - role 可以使用结构化英文值，但人物名称、目标、特征、主线等自然语言内容必须是中文。
+                输入上下文：
                 %s
                 """.formatted(toJson(new StoryBiblePromptInput(
                 project.getTitle(),
@@ -105,13 +113,14 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
     public ScenePlan generateScenePlan(NovelProject project, List<ChapterDigest> chapterDigests, StoryBible storyBible,
                                        GenerationOptions options) {
         String userPrompt = """
-                Task: generate one ScenePlan from chapter digests and story bible.
-                Output rules:
-                - Return one JSON object only.
-                - scenes must be a non-empty array.
-                - Each scene must have non-blank id/title/locationId/timeOfDay/dramaticPurpose/summary.
-                - Each scene must have non-empty sourceChapters and characters arrays.
-                Input:
+                任务：根据章节摘要和设定集生成一个 ScenePlan。
+                输出要求：
+                - 只返回一个 JSON 对象。
+                - scenes 必须是非空数组。
+                - 每个 scene 都必须有非空的 id/title/locationId/timeOfDay/dramaticPurpose/summary。
+                - 每个 scene 都必须有非空的 sourceChapters 和 characters 数组。
+                - title、dramaticPurpose、summary、requiredBeats 都必须是简体中文。
+                输入上下文：
                 %s
                 """.formatted(toJson(new ScenePlanPromptInput(
                 project.getTitle(),
@@ -126,15 +135,16 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
     @Override
     public SceneDraft generateSceneDraft(NovelProject project, SceneDraftContext context, GenerationOptions options) {
         String userPrompt = """
-                Task: generate one SceneDraft from SceneDraftContext.
-                Output rules:
-                - Return one JSON object only.
-                - Keep id/sourceChapters/locationId/characters aligned with the input plannedScene.
-                - title, dramaticPurpose and summary must be non-blank.
-                - blocks must be a non-empty array.
-                - Every block must contain type and text.
-                - Dialogue blocks should use a speakerId from the input characters.
-                Input:
+                任务：根据单场 SceneDraftContext 生成一个 SceneDraft。
+                输出要求：
+                - 只返回一个 JSON 对象。
+                - id/sourceChapters/locationId/characters 必须与输入 plannedScene 保持一致。
+                - title、dramaticPurpose、summary 必须是非空简体中文。
+                - blocks 必须是非空数组。
+                - 每个 block 都必须包含 type 和 text。
+                - dialogue 类型的 block 必须使用输入 characters 中已有的 speakerId。
+                - text 字段必须使用简体中文，不能写英文旁白。
+                输入上下文：
                 %s
                 """.formatted(toJson(SceneDraftPromptInput.from(project, context, options)));
 
@@ -180,7 +190,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
             String json = extractJsonObject(content);
             JsonNode node = objectMapper.readTree(json);
             if (!(node instanceof ObjectNode objectNode)) {
-                throw new IllegalStateException("Stage response root must be a JSON object");
+                throw new IllegalStateException("阶段响应根节点必须是 JSON 对象");
             }
             return objectNode;
         } catch (Exception exception) {
@@ -204,7 +214,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
         ArrayNode majorEvents = ensureArray(root, "majorEvents");
         normalizeStringArray(majorEvents, "event");
         if (majorEvents.isEmpty()) {
-            majorEvents.add("Summarize the chapter's main turning point.");
+            majorEvents.add("概括本章最关键的剧情转折。");
         }
 
         ArrayNode conflicts = ensureArray(root, "conflicts");
@@ -214,7 +224,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
         normalizeStringArray(openThreads, "open thread");
         normalizeStringArray(adaptationHints, "adaptation hint");
         if (adaptationHints.isEmpty()) {
-            adaptationHints.add("Keep the strongest dramatic beat visible on screen.");
+            adaptationHints.add("保留本章最强的戏剧冲突并尽量外化呈现。");
         }
 
         ArrayNode characters = ensureArray(root, "characters");
@@ -228,7 +238,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
                 item = characterNode;
             }
             if (item instanceof ObjectNode characterNode) {
-                putIfBlank(characterNode, "name", "Character " + (i + 1));
+                putIfBlank(characterNode, "name", "人物" + (i + 1));
                 ensureArray(characterNode, "aliases");
             }
         }
@@ -243,16 +253,16 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
                 item = locationNode;
             }
             if (item instanceof ObjectNode locationNode) {
-                putIfBlank(locationNode, "name", "Location " + (i + 1));
+                putIfBlank(locationNode, "name", "地点" + (i + 1));
                 putIfBlank(locationNode, "type", "interior");
             }
         }
 
         if (conflicts.isEmpty()) {
-            conflicts.add("Retain the chapter's core conflict in the adaptation.");
+            conflicts.add("保留本章核心冲突。");
         }
         if (openThreads.isEmpty()) {
-            openThreads.add("Carry one unresolved hook into later scenes.");
+            openThreads.add("保留一个后续可延续的悬念。");
         }
     }
 
@@ -269,7 +279,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
                 JsonNode item = charactersNode.get(i);
                 if (item instanceof ObjectNode characterNode) {
                     putIfBlank(characterNode, "id", "char_%03d".formatted(i + 1));
-                    putIfBlank(characterNode, "name", "Character " + (i + 1));
+                    putIfBlank(characterNode, "name", "人物" + (i + 1));
                     putIfBlank(characterNode, "role", i == 0 ? "protagonist" : "supporting");
                     ensureArray(characterNode, "aliases");
                     ensureArray(characterNode, "traits");
@@ -285,7 +295,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
                 JsonNode item = locationsNode.get(i);
                 if (item instanceof ObjectNode locationNode) {
                     putIfBlank(locationNode, "id", "loc_%03d".formatted(i + 1));
-                    putIfBlank(locationNode, "name", "Location " + (i + 1));
+                    putIfBlank(locationNode, "name", "地点" + (i + 1));
                     putIfBlank(locationNode, "type", "interior");
                 }
             }
@@ -306,12 +316,12 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
                 sceneNode.put("timeOfDay", i == 0 ? "night" : "day");
                 ArrayNode characters = sceneNode.putArray("characters");
                 storyBible.characters().stream().limit(2).map(BibleCharacter::id).forEach(characters::add);
-                sceneNode.put("dramaticPurpose", "Move the adaptation conflict forward.");
+                sceneNode.put("dramaticPurpose", "推动改编后的主要冲突继续升级。");
                 sceneNode.put("summary", digest.summary());
                 ArrayNode requiredBeats = sceneNode.putArray("requiredBeats");
                 digest.majorEvents().forEach(requiredBeats::add);
                 if (requiredBeats.isEmpty()) {
-                    requiredBeats.add("Retain the core dramatic beat.");
+                    requiredBeats.add("保留本场最关键的戏剧节拍。");
                 }
             }
         } else {
@@ -331,13 +341,13 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
                     if (characters.isEmpty()) {
                         storyBible.characters().stream().limit(2).map(BibleCharacter::id).forEach(characters::add);
                     }
-                    putIfBlank(sceneNode, "dramaticPurpose", "Move the adaptation conflict forward.");
+                    putIfBlank(sceneNode, "dramaticPurpose", "推动改编后的主要冲突继续升级。");
                     putIfBlank(sceneNode, "summary", digest.summary());
                     ArrayNode requiredBeats = ensureArray(sceneNode, "requiredBeats");
                     if (requiredBeats.isEmpty()) {
                         digest.majorEvents().forEach(requiredBeats::add);
                         if (requiredBeats.isEmpty()) {
-                            requiredBeats.add("Retain the core dramatic beat.");
+                            requiredBeats.add("保留本场最关键的戏剧节拍。");
                         }
                     }
                 }
@@ -373,7 +383,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
                 ObjectNode dialogue = blocks.addObject();
                 dialogue.put("type", "dialogue");
                 dialogue.put("speakerId", scene.characters().getFirst());
-                dialogue.put("text", "We have to keep moving.");
+                dialogue.put("text", "得继续查下去。");
             }
         } else {
             for (int i = 0; i < blocks.size(); i++) {
@@ -399,7 +409,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
             }
         }
         if (names.isEmpty()) {
-            names.add("Protagonist");
+            names.add("主角");
         }
         int index = 1;
         for (String name : names) {
@@ -408,7 +418,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
             character.put("name", name);
             character.putArray("aliases");
             character.put("role", index == 1 ? "protagonist" : "supporting");
-            character.put("goal", index == 1 ? "Pursue the core truth." : "Support the scene conflict.");
+            character.put("goal", index == 1 ? "追查核心真相。" : "服务当前场景冲突。");
             character.putArray("traits");
             index++;
         }
@@ -422,7 +432,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
             }
         }
         if (names.isEmpty()) {
-            names.add("Primary Location");
+            names.add("主要场景");
         }
         int index = 1;
         for (String name : names) {
@@ -439,7 +449,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
                 .map(ChapterDigest::summary)
                 .filter(summary -> summary != null && !summary.isBlank())
                 .findFirst()
-                .orElse("A protagonist uncovers the core conflict and keeps moving toward the truth.");
+                .orElse("主角在不断逼近核心真相的过程中，被卷入更深层的冲突。");
         return summarize(joined, 160);
     }
 
@@ -464,7 +474,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
         for (int i = 0; i < arrayNode.size(); i++) {
             JsonNode item = arrayNode.get(i);
             if (item == null || item.isNull()) {
-                arrayNode.set(i, objectMapper.getNodeFactory().textNode("Keep one " + fallbackLabel + " visible."));
+                arrayNode.set(i, objectMapper.getNodeFactory().textNode(buildFallbackArrayText(fallbackLabel)));
                 continue;
             }
             if (item.isTextual()) {
@@ -480,12 +490,22 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
                         item.path("label").asText(null)
                 );
                 arrayNode.set(i, objectMapper.getNodeFactory().textNode(
-                        extracted != null ? extracted : "Keep one " + fallbackLabel + " visible."
+                        extracted != null ? extracted : buildFallbackArrayText(fallbackLabel)
                 ));
                 continue;
             }
             arrayNode.set(i, objectMapper.getNodeFactory().textNode(item.asText()));
         }
+    }
+
+    private String buildFallbackArrayText(String fallbackLabel) {
+        return switch (fallbackLabel) {
+            case "event" -> "补充一个关键剧情事件。";
+            case "conflict" -> "补充一个核心冲突点。";
+            case "open thread" -> "补充一个可延续的悬念。";
+            case "adaptation hint" -> "补充一个适合影视化呈现的改编提示。";
+            default -> "补充一条必要信息。";
+        };
     }
 
     private String firstNonBlank(String... values) {
@@ -503,7 +523,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
 
     private String summarize(String value, int maxLength) {
         if (value == null || value.isBlank()) {
-            return "Preserve the chapter's strongest dramatic beat.";
+            return "保留本章最强的戏剧节拍。";
         }
         String normalized = value.strip();
         if (normalized.length() <= maxLength) {
@@ -514,12 +534,12 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
 
     private String extractJsonObject(String content) {
         if (content == null || content.isBlank()) {
-            throw new IllegalStateException("Model returned empty content");
+            throw new IllegalStateException("模型返回内容为空");
         }
         int start = content.indexOf('{');
         int end = content.lastIndexOf('}');
         if (start < 0 || end <= start) {
-            throw new IllegalStateException("Model response does not contain a JSON object");
+            throw new IllegalStateException("模型返回内容里找不到 JSON 对象");
         }
         return content.substring(start, end + 1);
     }

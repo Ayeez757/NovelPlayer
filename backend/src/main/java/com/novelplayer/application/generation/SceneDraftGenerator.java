@@ -73,7 +73,7 @@ public class SceneDraftGenerator {
      * @param project 小说改编项目。
      * @param chapters 按章节顺序排列的小说原文章节。
      * @param scenePlan 场景规划。
-     * @param storyBible 全局故事圣经。
+     * @param storyBible 全局故事设定集。
      * @param options 生成参数。
      * @return 与场景规划顺序一致的分场草稿列表。
      */
