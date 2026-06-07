@@ -2,7 +2,7 @@
   <main class="workspace-shell">
     <header class="workspace-topbar">
       <section class="brand-banner">
-        <h1 style="color: #3b82f6;">NovelPlayer</h1>
+        <h1>NovelPlayer</h1>
         <p>从小说原文到剧本草稿的改编工作台。</p>
       </section>
 

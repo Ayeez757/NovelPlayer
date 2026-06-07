@@ -50,10 +50,12 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final DeepSeekJsonExtractor jsonExtractor;
 
     public DeepSeekStagedScriptAiClient(ChatClient.Builder chatClientBuilder, ObjectMapper objectMapper) {
         this.chatClient = chatClientBuilder.build();
         this.objectMapper = objectMapper;
+        this.jsonExtractor = new DeepSeekJsonExtractor(objectMapper);
     }
 
     @Override
@@ -177,12 +179,7 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
         log.info("DeepSeek staged response received projectId={} stage={} responseLength={} elapsedMs={}",
                 project.getId(), stageName, content == null ? 0 : content.length(), elapsedMs);
         try {
-            String json = extractJsonObject(content);
-            JsonNode node = objectMapper.readTree(json);
-            if (!(node instanceof ObjectNode objectNode)) {
-                throw new IllegalStateException("Stage response root must be a JSON object");
-            }
-            return objectNode;
+            return jsonExtractor.extractObject(content, stageName);
         } catch (Exception exception) {
             throw new IllegalStateException("DeepSeek staged response is not valid JSON for " + stageName, exception);
         }
@@ -510,18 +507,6 @@ public class DeepSeekStagedScriptAiClient implements StagedScriptAiClient {
             return normalized;
         }
         return normalized.substring(0, maxLength) + "...";
-    }
-
-    private String extractJsonObject(String content) {
-        if (content == null || content.isBlank()) {
-            throw new IllegalStateException("Model returned empty content");
-        }
-        int start = content.indexOf('{');
-        int end = content.lastIndexOf('}');
-        if (start < 0 || end <= start) {
-            throw new IllegalStateException("Model response does not contain a JSON object");
-        }
-        return content.substring(start, end + 1);
     }
 
     private String toJson(Object value) {
