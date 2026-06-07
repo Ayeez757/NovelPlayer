@@ -9,61 +9,45 @@
 
 .app-fade-enter-active,
 .app-fade-leave-active {
-  transition:
-    opacity 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    filter 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 0.2s ease;
 }
 
 .app-fade-enter-from,
 .app-fade-leave-to {
   opacity: 0;
-  transform: translateY(10px) scale(0.994);
-  filter: blur(10px);
 }
 
 .app-fade-enter-to,
 .app-fade-leave-from {
   opacity: 1;
-  transform: translateY(0) scale(1);
-  filter: blur(0);
 }
 
 .workspace-shell {
   position: relative;
   min-height: 100vh;
   padding: 18px 18px 24px;
+  background: linear-gradient(180deg, #f7f9fc 0%, #f3f6fa 100%);
   isolation: isolate;
 }
 
 .workspace-shell::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.72), transparent 18%),
-    radial-gradient(circle at 88% 18%, rgba(207, 232, 255, 0.2), transparent 16%),
-    radial-gradient(circle at 72% 86%, rgba(226, 238, 255, 0.24), transparent 18%);
-  z-index: -1;
-  animation: shellFloat var(--float-duration-slow) var(--float-ease) infinite;
+  display: none;
 }
 
 .workspace-topbar {
   display: grid;
   grid-template-columns: minmax(260px, 420px) 1fr auto;
   align-items: center;
-  gap: 24px;
-  margin-bottom: 18px;
-  animation: floatGroup 7.4s var(--float-ease) infinite;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .workspace-body {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
-  gap: 18px;
+  gap: 16px;
   align-items: start;
-  transition: grid-template-columns 0.28s var(--float-ease);
+  transition: grid-template-columns 0.18s ease;
 }
 
 .topbar-actions {
@@ -80,17 +64,15 @@
   justify-content: center;
   min-height: 42px;
   padding: 0 16px;
-  border-radius: 999px;
+  border-radius: 8px;
   border: 1px solid #d7e3f1;
-  background: rgba(255, 255, 255, 0.88);
+  background: #ffffff;
   color: var(--text-body);
   cursor: pointer;
   transition:
-    transform 0.28s var(--float-ease),
-    box-shadow 0.28s var(--float-ease),
-    border-color 0.28s var(--float-ease),
-    color 0.28s var(--float-ease),
-    background-color 0.28s var(--float-ease);
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background-color 0.18s ease;
 }
 
 .topbar-link:hover,
@@ -99,8 +81,7 @@
 .topbar-button:focus-visible {
   color: var(--brand-primary);
   border-color: #bfdcff;
-  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.14);
-  transform: translateY(-2px);
+  background: #f5f9ff;
 }
 
 @media (max-width: 1100px) {

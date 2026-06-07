@@ -1,45 +1,42 @@
 .brand-banner {
   width: 100%;
   max-width: 650px;
-  padding: 12px 18px;
+  padding: 10px 14px;
   border: 1px solid #d9e0ea;
-  border-radius: 18px;
+  border-radius: 8px;
   background: var(--surface-base);
-  box-shadow: var(--float-shadow-rest);
 }
 
 .brand-banner h1 {
   margin: 0;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
-  color: var(--text-main);
-  text-decoration: underline;
-  text-decoration-color: #ef4444;
+  color: var(--brand-primary);
 }
 
 .brand-banner p {
   margin: 4px 0 0;
-  font-size: 14px;
-  color: #111827;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 .page-announcement {
   margin: 0;
+  width: fit-content;
+  padding: 8px 12px;
+  border: 1px solid #dbe5f2;
+  border-radius: 999px;
+  background: #ffffff;
   text-align: center;
-  font-size: 16px;
-  color: #253243;
-  transition:
-    transform 0.3s var(--float-ease),
-    opacity 0.3s var(--float-ease);
+  font-size: 14px;
+  color: var(--text-body);
 }
 
 .workspace-center {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
   min-width: 0;
-  animation: floatGroup 7.9s var(--float-ease) infinite;
-  animation-delay: -2.2s;
 }
 
 .workspace-center.is-horizontal-compare {
@@ -140,7 +137,7 @@
   .brand-banner,
   .sidebar-panel,
   .content-card {
-    border-radius: 16px;
+    border-radius: 8px;
   }
 
   .content-card,
