@@ -16,6 +16,7 @@ import com.novelplayer.domain.project.NovelChapter;
 import com.novelplayer.domain.project.NovelProject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
@@ -46,6 +47,7 @@ public class SceneDraftGenerator {
 
     private final StagedScriptAiClient aiClient;
     private final GenerationStageStore stageStore;
+    private final ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider;
 
     /**
      * 创建分场草稿阶段生成器。
@@ -53,9 +55,15 @@ public class SceneDraftGenerator {
      * @param aiClient 阶段化 AI 客户端。
      * @param stageStore 生成阶段结果存取层。
      */
-    public SceneDraftGenerator(StagedScriptAiClient aiClient, GenerationStageStore stageStore) {
+    /*
+     * 旧构造器只有 2 个参数，无法把 scene_draft:scene_001 这类细粒度阶段及时写回数据库。
+     * public SceneDraftGenerator(StagedScriptAiClient aiClient, GenerationStageStore stageStore) { ... }
+     */
+    public SceneDraftGenerator(StagedScriptAiClient aiClient, GenerationStageStore stageStore,
+                               ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider) {
         this.aiClient = aiClient;
         this.stageStore = stageStore;
+        this.lifecycleServiceProvider = lifecycleServiceProvider;
     }
 
     /**
@@ -121,6 +129,7 @@ public class SceneDraftGenerator {
                                    @Nullable String previousSceneSummary,
                                    GenerationOptions options) {
         String stageName = GenerationStageNames.sceneDraft(scene.id());
+        moveJobToStage(job, stageName);
         String inputHash = null;
         try {
             SceneDraftContext context = buildContext(scene, chaptersByIndex, charactersById,
@@ -150,6 +159,19 @@ public class SceneDraftGenerator {
             log.warn("分场草稿生成失败 jobId={} projectId={} sceneId={} stageName={} error={}",
                     job.getId(), project.getId(), scene.id(), stageName, exception.getMessage(), exception);
             throw exception;
+        }
+    }
+
+    /**
+     * 尽力把当前细粒度阶段写回任务表，保证前端能看到 scene_draft:scene_001 这类阶段值。
+     *
+     * @param job 当前任务。
+     * @param stageName 细粒度阶段名。
+     */
+    private void moveJobToStage(GenerationJob job, String stageName) {
+        GenerationJobLifecycleService lifecycleService = lifecycleServiceProvider.getIfAvailable();
+        if (lifecycleService != null && job.getId() != null) {
+            lifecycleService.moveToStage(job.getId(), stageName);
         }
     }
 

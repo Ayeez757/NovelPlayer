@@ -626,6 +626,27 @@
   list-style: none;
 }
 
+.log-grid > .log-panel:last-child .log-feed {
+  max-height: clamp(240px, 42vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 6px;
+}
+
+.log-grid > .log-panel:last-child .log-feed::-webkit-scrollbar {
+  width: 8px;
+}
+
+.log-grid > .log-panel:last-child .log-feed::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #c7d5e6;
+}
+
+.log-grid > .log-panel:last-child .log-feed::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .log-feed__item {
   padding: 14px;
   border: 1px solid #e0e8f2;

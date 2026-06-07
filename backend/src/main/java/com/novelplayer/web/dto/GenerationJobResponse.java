@@ -20,6 +20,18 @@ public record GenerationJobResponse(
         String currentStage,
         String errorMessage,
         OffsetDateTime createdAt,
-        OffsetDateTime finishedAt
+        OffsetDateTime finishedAt,
+        Progress progress
 ) {
+
+    /*
+     * 旧版响应没有 progress，前端只能看到当前阶段名，看不到“已完成 / 总数 / 失败数”。
+     * 这里用内嵌 record 承载轻量进度信息，避免再额外创建 DTO 文件。
+     */
+    public record Progress(
+            int total,
+            int completed,
+            int failed
+    ) {
+    }
 }

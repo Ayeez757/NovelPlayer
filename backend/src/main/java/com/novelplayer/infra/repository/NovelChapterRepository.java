@@ -17,4 +17,7 @@ public interface NovelChapterRepository extends JpaRepository<NovelChapter, Long
      * @return 按章节顺序排列的章节列表。
      */
     List<NovelChapter> findByProjectIdOrderByChapterIndex(Long projectId);
+
+    // 给 chapter_digest 进度统计使用，避免重新拉整章列表只为数总数。
+    long countByProjectId(Long projectId);
 }

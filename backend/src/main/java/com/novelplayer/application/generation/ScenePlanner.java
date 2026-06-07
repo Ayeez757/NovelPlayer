@@ -75,7 +75,15 @@ public class ScenePlanner {
                 job.getId(), project.getId(), digests.size(), storyBible.characters().size(),
                 storyBible.locations().size(), stageName, inputHash);
 
+//        Optional<ScenePlan> cached = stageStore.findSucceeded(job, stageName, inputHash, ScenePlan.class);
+        // 用 projectId 查缓存，才能跨 job 复用
+        /*
+         * 之前的改动把这里切成了 projectId 直调版本：
+         * Optional<ScenePlan> cached = stageStore.findSucceeded(
+         *         project.getId(), stageName, inputHash, ScenePlan.class);
+         */
         Optional<ScenePlan> cached = stageStore.findSucceeded(job, stageName, inputHash, ScenePlan.class);
+
         if (cached.isPresent()) {
             ScenePlan scenePlan = cached.orElseThrow();
             validate(scenePlan, digests, storyBible);

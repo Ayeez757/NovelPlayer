@@ -35,6 +35,12 @@ export interface ScriptDocumentResponse {
   createdAt: string
 }
 
+export interface GenerationJobProgress {
+  total: number
+  completed: number
+  failed: number
+}
+
 export interface GenerationJobResponse {
   id: number
   projectId: number
@@ -43,4 +49,5 @@ export interface GenerationJobResponse {
   errorMessage: string | null
   createdAt: string
   finishedAt: string | null
+  progress: GenerationJobProgress | null
 }
