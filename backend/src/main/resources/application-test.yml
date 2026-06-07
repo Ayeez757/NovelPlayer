@@ -49,7 +49,12 @@ management:
         include: health,info
 
 novel-player:
+  ai:
+    deepseek:
+      thinking-mode: ${NOVEL_PLAYER_DEEPSEEK_THINKING_MODE:disabled}
   generation:
     minimum-chapters: ${NOVEL_PLAYER_MINIMUM_CHAPTERS:3}
     pipeline-mode: ${NOVEL_PLAYER_GENERATION_PIPELINE_MODE:staged}
     mock-ai: ${NOVEL_PLAYER_MOCK_AI:true}
+    chapter-digest-concurrency: ${NOVEL_PLAYER_CHAPTER_DIGEST_CONCURRENCY:4}
+    scene-draft-concurrency: ${NOVEL_PLAYER_SCENE_DRAFT_CONCURRENCY:2}

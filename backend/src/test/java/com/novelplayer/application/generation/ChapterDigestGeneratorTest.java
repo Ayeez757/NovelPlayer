@@ -1,7 +1,9 @@
 package com.novelplayer.application.generation;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.novelplayer.ai.StagedScriptAiClient;
 import com.novelplayer.application.generation.model.ChapterDigest;
+import com.novelplayer.config.NovelPlayerProperties;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.generation.GenerationStageResult;
 import com.novelplayer.domain.generation.GenerationStatus;
@@ -29,7 +31,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 覆盖章节摘要阶段生成器的缓存复用、正常生成和失败记录行为。
+ * Covers chapter digest caching, persistence, failure recording and configured parallel execution.
  */
 @ExtendWith(MockitoExtension.class)
 class ChapterDigestGeneratorTest {
@@ -46,39 +48,19 @@ class ChapterDigestGeneratorTest {
     private GenerationStageStore stageStore;
     private ChapterDigestGenerator generator;
 
-    /**
-     * 为每个用例创建阶段存储和章节摘要生成器。
-     */
     @BeforeEach
     void setUp() {
-        stageStore = new GenerationStageStore(repository, new com.fasterxml.jackson.databind.ObjectMapper());
-        /*
-         * 旧测试构造器参数只有 2 个：
-         * generator = new ChapterDigestGenerator(aiClient, stageStore);
-         */
-        generator = new ChapterDigestGenerator(aiClient, stageStore, lifecycleServiceProvider);
+        stageStore = new GenerationStageStore(repository, new ObjectMapper());
+        generator = generatorWithConcurrency(1);
     }
 
-    /**
-     * 验证输入哈希命中时会复用已保存的章节摘要。
-     */
     @Test
     void reusesCachedChapterDigestWhenInputHashMatches() {
         GenerationJob job = persistedJob(12L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
-        NovelChapter chapter = new NovelChapter(project, 1, "雨夜", "她发现一封信。");
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
+        NovelChapter chapter = new NovelChapter(project, 1, "Rain Night", "She finds a letter.");
         GenerationOptions options = GenerationOptions.defaults();
-        ChapterDigest digest = new ChapterDigest(
-                1,
-                "雨夜",
-                "她发现一封信。",
-                List.of("发现信件"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of()
-        );
+        ChapterDigest digest = digest(1, "Rain Night", "She finds a letter.");
         String inputHash = stageStore.sha256OfJson(chapterDigestInput(project, chapter, options));
         GenerationStageResult cached = new GenerationStageResult(
                 job,
@@ -98,27 +80,16 @@ class ChapterDigestGeneratorTest {
         verify(aiClient, never()).generateChapterDigest(any(), any(), any());
     }
 
-    /**
-     * 验证缓存未命中时会调用 AI 并保存成功阶段结果。
-     */
     @Test
     void generatesAndPersistsDigestWhenCacheMisses() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         GenerationJob job = persistedJob(21L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
-        NovelChapter chapter = new NovelChapter(project, 1, "雨夜", "她在旧书店发现一封信，并意识到父亲失踪另有隐情。");
-        GenerationOptions options = new GenerationOptions("web_drama", "suspense", 60, 30, "强化主角主动性");
-        ChapterDigest digest = new ChapterDigest(
-                1,
-                "雨夜",
-                "她在旧书店发现一封信。",
-                List.of("发现信件"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of()
-        );
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
+        NovelChapter chapter = new NovelChapter(project, 1, "Rain Night",
+                "She finds a letter and realizes the case is not closed.");
+        GenerationOptions options = new GenerationOptions("web_drama", "suspense", 60, 30,
+                "Make the protagonist proactive.");
+        ChapterDigest digest = digest(1, "Rain Night", "The letter changes the case.");
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(21L), eq(GenerationStageNames.chapterDigest(1)), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
@@ -132,20 +103,17 @@ class ChapterDigestGeneratorTest {
         GenerationStageResult saved = captor.getValue();
         assertThat(saved.getStageName()).isEqualTo(GenerationStageNames.chapterDigest(1));
         assertThat(saved.getStatus()).isEqualTo(GenerationStatus.SUCCEEDED);
-        assertThat(saved.getOutputJson()).contains("\"summary\":\"她在旧书店发现一封信。\"");
+        assertThat(saved.getOutputJson()).contains("\"summary\":\"The letter changes the case.\"");
     }
 
-    /**
-     * 验证 AI 生成失败时会记录失败阶段并继续抛出原异常。
-     */
     @Test
     void recordsFailedStageAndPropagatesException() {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         GenerationJob job = persistedJob(31L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
-        NovelChapter chapter = new NovelChapter(project, 1, "雨夜", "她在旧书店发现一封信，并意识到父亲失踪另有隐情。");
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
+        NovelChapter chapter = new NovelChapter(project, 1, "Rain Night", "She finds a letter.");
         GenerationOptions options = GenerationOptions.defaults();
-        RuntimeException failure = new RuntimeException("模型返回非法内容");
+        RuntimeException failure = new RuntimeException("model returned invalid content");
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(31L), eq(GenerationStageNames.chapterDigest(1)), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
@@ -158,28 +126,72 @@ class ChapterDigestGeneratorTest {
         GenerationStageResult saved = captor.getValue();
         assertThat(saved.getStatus()).isEqualTo(GenerationStatus.FAILED);
         assertThat(saved.getStageName()).isEqualTo(GenerationStageNames.chapterDigest(1));
-        assertThat(saved.getErrorMessage()).isEqualTo("模型返回非法内容");
+        assertThat(saved.getErrorMessage()).isEqualTo("model returned invalid content");
     }
 
-    /**
-     * 验证空章节列表会在进入阶段查询前被拒绝。
-     */
     @Test
     void rejectsEmptyChapterListEarly() {
         GenerationJob job = persistedJob(41L);
-        NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
 
         assertThatThrownBy(() -> generator.generate(job, project, List.of(), GenerationOptions.defaults()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("chapters");
     }
 
-    /**
-     * 构造带主键的生成任务，模拟已持久化状态。
-     *
-     * @param id 任务主键。
-     * @return 已设置主键的生成任务。
-     */
+    @Test
+    void parallelGenerationKeepsChapterOrderAndAvoidsFineGrainedStageWrites() {
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        GenerationJob job = persistedJob(51L);
+        NovelProject project = new NovelProject("Rain Night", "chapter source");
+        NovelChapter chapterOne = new NovelChapter(project, 1, "Chapter 1", "First chapter.");
+        NovelChapter chapterTwo = new NovelChapter(project, 2, "Chapter 2", "Second chapter.");
+        GenerationOptions options = GenerationOptions.defaults();
+        ChapterDigestGenerator parallelGenerator = generatorWithConcurrency(2);
+        when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
+                eq(51L), any(String.class), eq(GenerationStatus.SUCCEEDED), any(String.class)))
+                .thenReturn(Optional.empty());
+        when(aiClient.generateChapterDigest(eq(project), any(NovelChapter.class), eq(options)))
+                .thenAnswer(invocation -> {
+                    NovelChapter chapter = invocation.getArgument(1);
+                    return digest(chapter.getChapterIndex(), chapter.getTitle(),
+                            "summary-" + chapter.getChapterIndex());
+                });
+
+        List<ChapterDigest> results = parallelGenerator.generate(
+                job, project, List.of(chapterOne, chapterTwo), options);
+
+        assertThat(results).extracting(ChapterDigest::chapterIndex).containsExactly(1, 2);
+        assertThat(results).extracting(ChapterDigest::summary).containsExactly("summary-1", "summary-2");
+        verify(lifecycleServiceProvider, never()).getIfAvailable();
+    }
+
+    private ChapterDigestGenerator generatorWithConcurrency(int concurrency) {
+        NovelPlayerProperties properties = new NovelPlayerProperties();
+        properties.getGeneration().setChapterDigestConcurrency(concurrency);
+        return new ChapterDigestGenerator(
+                aiClient,
+                stageStore,
+                lifecycleServiceProvider,
+                properties,
+                new GenerationStageParallelExecutor(Runnable::run)
+        );
+    }
+
+    private static ChapterDigest digest(int chapterIndex, String title, String summary) {
+        return new ChapterDigest(
+                chapterIndex,
+                title,
+                summary,
+                List.of("event-" + chapterIndex),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()
+        );
+    }
+
     private static GenerationJob persistedJob(Long id) {
         GenerationJob job = new GenerationJob(new NovelProject("title", "source"));
         try {
@@ -192,29 +204,16 @@ class ChapterDigestGeneratorTest {
         }
     }
 
-    /**
-     * 将章节摘要转为 JSON，便于模拟缓存命中的阶段输出。
-     *
-     * @param digest 章节摘要。
-     * @return JSON 文本。
-     */
     private static String toJson(ChapterDigest digest) {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(digest);
+            return new ObjectMapper().writeValueAsString(digest);
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
     }
 
-    /**
-     * 构造与生产代码一致的章节摘要输入快照，用于计算预期缓存哈希。
-     *
-     * @param project 小说改编项目。
-     * @param chapter 待生成摘要的章节。
-     * @param options 生成参数。
-     * @return 哈希输入快照。
-     */
-    private static ChapterDigestInput chapterDigestInput(NovelProject project, NovelChapter chapter, GenerationOptions options) {
+    private static ChapterDigestInput chapterDigestInput(NovelProject project, NovelChapter chapter,
+                                                         GenerationOptions options) {
         return new ChapterDigestInput(
                 project.getId(),
                 project.getTitle(),
@@ -230,21 +229,6 @@ class ChapterDigestGeneratorTest {
         );
     }
 
-    /**
-     * 章节摘要测试使用的输入快照结构。
-     *
-     * @param projectId 项目主键。
-     * @param projectTitle 项目标题。
-     * @param chapterIndex 章节序号。
-     * @param chapterTitle 章节标题。
-     * @param chapterContent 章节正文。
-     * @param format 剧本形式。
-     * @param tone 整体风格。
-     * @param dialogueDensity 对白密度。
-     * @param narrationRetention 旁白保留度。
-     * @param hasAdditionalInstructions 是否包含补充要求。
-     * @param additionalInstructions 补充要求。
-     */
     private record ChapterDigestInput(
             Long projectId,
             String projectTitle,

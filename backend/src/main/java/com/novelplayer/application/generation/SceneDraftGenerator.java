@@ -1,7 +1,5 @@
 package com.novelplayer.application.generation;
 
-//增加import
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import com.novelplayer.ai.StagedScriptAiClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
 import com.novelplayer.application.generation.model.BibleLocation;
@@ -11,12 +9,14 @@ import com.novelplayer.application.generation.model.SceneDraft;
 import com.novelplayer.application.generation.model.SceneDraftContext;
 import com.novelplayer.application.generation.model.ScenePlan;
 import com.novelplayer.application.generation.model.StoryBible;
+import com.novelplayer.config.NovelPlayerProperties;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.project.NovelChapter;
 import com.novelplayer.domain.project.NovelProject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
@@ -33,11 +33,10 @@ import java.util.Set;
 /**
  * 分场草稿阶段生成器。
  *
- * <p>该阶段按 {@link ScenePlan#scenes()} 顺序逐场生成正文草稿，每一场只携带当前场景需要的
- * 最小上下文，并以 {@code scene_draft:<sceneId>} 独立落库，方便后续支持单场重生成。</p>
+ * <p>该阶段按 {@link ScenePlan#scenes()} 生成正文草稿，每一场只携带当前场景需要的最小上下文，
+ * 并以 {@code scene_draft:<sceneId>} 独立落库，方便后续复用或单场重生成。</p>
  */
 @Service
-//增加注解
 @ConditionalOnBean(StagedScriptAiClient.class)
 @ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
         matchIfMissing = true)
@@ -48,22 +47,29 @@ public class SceneDraftGenerator {
     private final StagedScriptAiClient aiClient;
     private final GenerationStageStore stageStore;
     private final ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider;
+    private final NovelPlayerProperties properties;
+    private final GenerationStageParallelExecutor parallelExecutor;
 
     /**
      * 创建分场草稿阶段生成器。
      *
      * @param aiClient 阶段化 AI 客户端。
      * @param stageStore 生成阶段结果存取层。
+     * @param lifecycleServiceProvider 任务生命周期服务，测试场景下可为空。
+     * @param properties 应用配置。
+     * @param parallelExecutor 阶段内有界并行执行器。
      */
-    /*
-     * 旧构造器只有 2 个参数，无法把 scene_draft:scene_001 这类细粒度阶段及时写回数据库。
-     * public SceneDraftGenerator(StagedScriptAiClient aiClient, GenerationStageStore stageStore) { ... }
-     */
-    public SceneDraftGenerator(StagedScriptAiClient aiClient, GenerationStageStore stageStore,
-                               ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider) {
-        this.aiClient = aiClient;
-        this.stageStore = stageStore;
-        this.lifecycleServiceProvider = lifecycleServiceProvider;
+    public SceneDraftGenerator(StagedScriptAiClient aiClient,
+                               GenerationStageStore stageStore,
+                               ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider,
+                               NovelPlayerProperties properties,
+                               GenerationStageParallelExecutor parallelExecutor) {
+        this.aiClient = Objects.requireNonNull(aiClient, "aiClient must not be null");
+        this.stageStore = Objects.requireNonNull(stageStore, "stageStore must not be null");
+        this.lifecycleServiceProvider = Objects.requireNonNull(
+                lifecycleServiceProvider, "lifecycleServiceProvider must not be null");
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.parallelExecutor = Objects.requireNonNull(parallelExecutor, "parallelExecutor must not be null");
     }
 
     /**
@@ -88,18 +94,23 @@ public class SceneDraftGenerator {
         Map<String, BibleCharacter> charactersById = indexCharacters(storyBible.characters());
         Map<String, BibleLocation> locationsById = indexLocations(storyBible.locations());
         validateSceneIds(scenePlan);
+        int concurrency = Math.min(
+                properties.getGeneration().getSceneDraftConcurrency(),
+                scenePlan.scenes().size()
+        );
 
-        log.info("开始生成分场草稿 jobId={} projectId={} sceneCount={} chapterCount={} characterCount={} locationCount={}",
+        log.info("开始生成分场草稿 jobId={} projectId={} sceneCount={} chapterCount={} characterCount={} "
+                        + "locationCount={} concurrency={}",
                 job.getId(), project.getId(), scenePlan.scenes().size(), chaptersByIndex.size(),
-                charactersById.size(), locationsById.size());
+                charactersById.size(), locationsById.size(), concurrency);
 
-        List<SceneDraft> drafts = new ArrayList<>(scenePlan.scenes().size());
-        String previousSceneSummary = null;
-        for (PlannedScene scene : scenePlan.scenes()) {
-            SceneDraft draft = generateOne(job, project, scene, chaptersByIndex, charactersById,
-                    locationsById, storyBible.continuityRules(), previousSceneSummary, options);
-            drafts.add(draft);
-            previousSceneSummary = draft.summary();
+        List<SceneDraft> drafts;
+        if (concurrency == 1) {
+            drafts = generateSerial(job, project, scenePlan.scenes(), chaptersByIndex, charactersById,
+                    locationsById, storyBible.continuityRules(), options);
+        } else {
+            drafts = generateParallel(job, project, scenePlan.scenes(), chaptersByIndex, charactersById,
+                    locationsById, storyBible.continuityRules(), options, concurrency);
         }
 
         log.info("分场草稿阶段完成 jobId={} projectId={} sceneCount={} draftCount={}",
@@ -107,19 +118,53 @@ public class SceneDraftGenerator {
         return List.copyOf(drafts);
     }
 
+    private List<SceneDraft> generateSerial(GenerationJob job, NovelProject project, List<PlannedScene> scenes,
+                                            Map<Integer, NovelChapter> chaptersByIndex,
+                                            Map<String, BibleCharacter> charactersById,
+                                            Map<String, BibleLocation> locationsById,
+                                            List<String> continuityRules,
+                                            GenerationOptions options) {
+        List<SceneDraft> drafts = new ArrayList<>(scenes.size());
+        String previousSceneSummary = null;
+        for (PlannedScene scene : scenes) {
+            SceneDraft draft = generateOne(job, project, scene, chaptersByIndex, charactersById,
+                    locationsById, continuityRules, previousSceneSummary, options, true);
+            drafts.add(draft);
+            previousSceneSummary = draft.summary();
+        }
+        return drafts;
+    }
+
+    private List<SceneDraft> generateParallel(GenerationJob job, NovelProject project, List<PlannedScene> scenes,
+                                              Map<Integer, NovelChapter> chaptersByIndex,
+                                              Map<String, BibleCharacter> charactersById,
+                                              Map<String, BibleLocation> locationsById,
+                                              List<String> continuityRules,
+                                              GenerationOptions options,
+                                              int concurrency) {
+        List<SceneTask> tasks = new ArrayList<>(scenes.size());
+        for (int index = 0; index < scenes.size(); index++) {
+            /*
+             * 并行模式不能等待上一场的实际生成摘要，否则会退化为串行。
+             * 因此这里使用上一场规划摘要作为邻近上下文，牺牲少量跨场即时反馈，换取稳定的并发加速。
+             */
+            String previousPlannedSummary = index == 0 ? null : scenes.get(index - 1).summary();
+            tasks.add(new SceneTask(scenes.get(index), previousPlannedSummary));
+        }
+
+        return parallelExecutor.runOrdered(
+                GenerationStageNames.SCENE_DRAFT,
+                tasks,
+                concurrency,
+                task -> generateOne(job, project, task.scene(), chaptersByIndex, charactersById,
+                        locationsById, continuityRules, task.previousSceneSummary(), options, false)
+        );
+    }
+
     /**
      * 生成或复用单个分场草稿。
      *
-     * @param job 当前生成任务。
-     * @param project 小说改编项目。
-     * @param scene 当前场景规划。
-     * @param chaptersByIndex 章节编号到原文章节的索引。
-     * @param charactersById 人物编号到人物资料的索引。
-     * @param locationsById 地点编号到地点资料的索引。
-     * @param continuityRules 全局连续性规则。
-     * @param previousSceneSummary 前一个场景摘要，可为空。
-     * @param options 生成参数。
-     * @return 单场分场草稿。
+     * @param updateCurrentStage 是否把任务阶段推进到当前细粒度阶段；并行模式下应关闭。
      */
     private SceneDraft generateOne(GenerationJob job, NovelProject project, PlannedScene scene,
                                    Map<Integer, NovelChapter> chaptersByIndex,
@@ -127,15 +172,19 @@ public class SceneDraftGenerator {
                                    Map<String, BibleLocation> locationsById,
                                    List<String> continuityRules,
                                    @Nullable String previousSceneSummary,
-                                   GenerationOptions options) {
+                                   GenerationOptions options,
+                                   boolean updateCurrentStage) {
         String stageName = GenerationStageNames.sceneDraft(scene.id());
-        moveJobToStage(job, stageName);
+        if (updateCurrentStage) {
+            moveJobToStage(job, stageName);
+        }
         String inputHash = null;
         try {
             SceneDraftContext context = buildContext(scene, chaptersByIndex, charactersById,
                     locationsById, continuityRules, previousSceneSummary);
             inputHash = stageStore.sha256OfJson(SceneDraftInput.from(project, context, options));
-            log.info("开始生成单场草稿 jobId={} projectId={} sceneId={} stageName={} inputHash={} sourceChapterCount={} characterCount={}",
+            log.info("开始生成单场草稿 jobId={} projectId={} sceneId={} stageName={} inputHash={} "
+                            + "sourceChapterCount={} characterCount={}",
                     job.getId(), project.getId(), scene.id(), stageName, inputHash,
                     context.sourceChapters().size(), context.characters().size());
 
@@ -163,10 +212,7 @@ public class SceneDraftGenerator {
     }
 
     /**
-     * 尽力把当前细粒度阶段写回任务表，保证前端能看到 scene_draft:scene_001 这类阶段值。
-     *
-     * @param job 当前任务。
-     * @param stageName 细粒度阶段名。
+     * 尽力把当前细粒度阶段写回任务表，供串行模式下的前端轮询展示使用。
      */
     private void moveJobToStage(GenerationJob job, String stageName) {
         GenerationJobLifecycleService lifecycleService = lifecycleServiceProvider.getIfAvailable();
@@ -175,17 +221,6 @@ public class SceneDraftGenerator {
         }
     }
 
-    /**
-     * 构造单场写作的最小上下文。
-     *
-     * @param scene 当前场景规划。
-     * @param chaptersByIndex 章节编号到原文章节的索引。
-     * @param charactersById 人物编号到人物资料的索引。
-     * @param locationsById 地点编号到地点资料的索引。
-     * @param continuityRules 全局连续性规则。
-     * @param previousSceneSummary 前一个场景摘要，可为空。
-     * @return 分场写作上下文。
-     */
     private static SceneDraftContext buildContext(PlannedScene scene,
                                                   Map<Integer, NovelChapter> chaptersByIndex,
                                                   Map<String, BibleCharacter> charactersById,
@@ -202,12 +237,6 @@ public class SceneDraftGenerator {
         return new SceneDraftContext(scene, sourceChapters, characters, location, continuityRules, previousSceneSummary);
     }
 
-    /**
-     * 校验 AI 返回的草稿仍然匹配当前场景规划和最小上下文。
-     *
-     * @param draft 待校验分场草稿。
-     * @param context 当前分场写作上下文。
-     */
     private static void validateDraft(SceneDraft draft, SceneDraftContext context) {
         Objects.requireNonNull(draft, "sceneDraft must not be null");
         PlannedScene scene = context.plannedScene();
@@ -226,12 +255,6 @@ public class SceneDraftGenerator {
         validateBlockSpeakers(draft, context);
     }
 
-    /**
-     * 校验分场正文块中的说话人引用只来自当前场景人物。
-     *
-     * @param draft 待校验分场草稿。
-     * @param context 当前分场写作上下文。
-     */
     private static void validateBlockSpeakers(SceneDraft draft, SceneDraftContext context) {
         Set<String> availableCharacterIds = new HashSet<>();
         context.characters().forEach(character -> availableCharacterIds.add(character.id()));
@@ -243,12 +266,6 @@ public class SceneDraftGenerator {
         }
     }
 
-    /**
-     * 建立章节编号索引，并校验章节列表可用于分场生成。
-     *
-     * @param chapters 原文章节列表。
-     * @return 章节编号到章节实体的索引。
-     */
     private static Map<Integer, NovelChapter> indexChapters(List<NovelChapter> chapters) {
         if (chapters == null || chapters.isEmpty()) {
             throw new IllegalArgumentException("chapters must not be empty");
@@ -264,12 +281,6 @@ public class SceneDraftGenerator {
         return Map.copyOf(chaptersByIndex);
     }
 
-    /**
-     * 建立人物编号索引，并校验人物编号不重复。
-     *
-     * @param characters 故事圣经人物列表。
-     * @return 人物编号到人物资料的索引。
-     */
     private static Map<String, BibleCharacter> indexCharacters(List<BibleCharacter> characters) {
         Map<String, BibleCharacter> charactersById = new HashMap<>();
         for (BibleCharacter character : characters) {
@@ -281,12 +292,6 @@ public class SceneDraftGenerator {
         return Map.copyOf(charactersById);
     }
 
-    /**
-     * 建立地点编号索引，并校验地点编号不重复。
-     *
-     * @param locations 故事圣经地点列表。
-     * @return 地点编号到地点资料的索引。
-     */
     private static Map<String, BibleLocation> indexLocations(List<BibleLocation> locations) {
         Map<String, BibleLocation> locationsById = new HashMap<>();
         for (BibleLocation location : locations) {
@@ -298,11 +303,6 @@ public class SceneDraftGenerator {
         return Map.copyOf(locationsById);
     }
 
-    /**
-     * 校验场景规划中场景编号不重复。
-     *
-     * @param scenePlan 场景规划。
-     */
     private static void validateSceneIds(ScenePlan scenePlan) {
         Set<String> sceneIds = new HashSet<>();
         for (PlannedScene scene : scenePlan.scenes()) {
@@ -312,14 +312,6 @@ public class SceneDraftGenerator {
         }
     }
 
-    /**
-     * 从章节索引中读取当前场景引用的原文章节。
-     *
-     * @param chaptersByIndex 章节编号索引。
-     * @param sceneId 场景编号。
-     * @param chapterIndex 章节编号。
-     * @return 原文章节。
-     */
     private static NovelChapter requireChapter(Map<Integer, NovelChapter> chaptersByIndex, String sceneId,
                                                Integer chapterIndex) {
         NovelChapter chapter = chaptersByIndex.get(chapterIndex);
@@ -330,14 +322,6 @@ public class SceneDraftGenerator {
         return chapter;
     }
 
-    /**
-     * 从人物索引中读取当前场景引用的人物资料。
-     *
-     * @param charactersById 人物编号索引。
-     * @param sceneId 场景编号。
-     * @param characterId 人物编号。
-     * @return 人物资料。
-     */
     private static BibleCharacter requireCharacter(Map<String, BibleCharacter> charactersById, String sceneId,
                                                    String characterId) {
         BibleCharacter character = charactersById.get(characterId);
@@ -348,14 +332,6 @@ public class SceneDraftGenerator {
         return character;
     }
 
-    /**
-     * 从地点索引中读取当前场景引用的地点资料。
-     *
-     * @param locationsById 地点编号索引。
-     * @param sceneId 场景编号。
-     * @param locationId 地点编号。
-     * @return 地点资料。
-     */
     private static BibleLocation requireLocation(Map<String, BibleLocation> locationsById, String sceneId,
                                                  String locationId) {
         BibleLocation location = locationsById.get(locationId);
@@ -366,23 +342,11 @@ public class SceneDraftGenerator {
         return location;
     }
 
+    private record SceneTask(PlannedScene scene, String previousSceneSummary) {
+    }
+
     /**
      * 分场草稿阶段的输入快照。
-     *
-     * @param projectId 项目主键。
-     * @param projectTitle 项目标题。
-     * @param plannedScene 当前场景规划。
-     * @param sourceChapters 当前场景引用的原文章节快照。
-     * @param characters 当前场景涉及的人物资料。
-     * @param location 当前场景涉及的地点资料。
-     * @param continuityRules 全局连续性规则。
-     * @param previousSceneSummary 前一个场景摘要。
-     * @param format 剧本形式。
-     * @param tone 整体风格。
-     * @param dialogueDensity 对白密度。
-     * @param narrationRetention 旁白保留度。
-     * @param hasAdditionalInstructions 是否存在用户补充要求。
-     * @param additionalInstructions 用户补充要求。
      */
     private record SceneDraftInput(
             Long projectId,
@@ -400,14 +364,6 @@ public class SceneDraftGenerator {
             boolean hasAdditionalInstructions,
             String additionalInstructions
     ) {
-        /**
-         * 从当前分场写作上下文构造输入快照。
-         *
-         * @param project 小说改编项目。
-         * @param context 分场写作上下文。
-         * @param options 生成参数。
-         * @return 用于哈希计算的输入快照。
-         */
         private static SceneDraftInput from(NovelProject project, SceneDraftContext context, GenerationOptions options) {
             return new SceneDraftInput(
                     project.getId(),
@@ -432,11 +388,6 @@ public class SceneDraftGenerator {
 
     /**
      * 分场草稿阶段引用原文章节的输入快照。
-     *
-     * @param chapterId 章节主键。
-     * @param chapterIndex 章节序号。
-     * @param title 章节标题。
-     * @param content 章节正文。
      */
     private record SourceChapterInput(
             Long chapterId,
@@ -444,12 +395,6 @@ public class SceneDraftGenerator {
             String title,
             String content
     ) {
-        /**
-         * 从小说章节实体构造稳定输入快照，避免直接序列化 JPA 实体。
-         *
-         * @param chapter 小说章节实体。
-         * @return 原文章节输入快照。
-         */
         private static SourceChapterInput from(NovelChapter chapter) {
             return new SourceChapterInput(
                     chapter.getId(),
