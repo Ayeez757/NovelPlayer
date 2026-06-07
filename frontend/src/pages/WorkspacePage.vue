@@ -272,6 +272,7 @@
 
                 <div v-if="supportsChapterSelectionSubmission" class="chapter-selection-actions">
                   <button type="button" class="text-link" @click="selectAllChapters">全选</button>
+                  <button type="button" class="text-link" @click="invertChapterSelection">反选</button>
                   <button type="button" class="text-link" @click="clearChapterSelection">清空</button>
                 </div>
               </div>
@@ -543,6 +544,7 @@ const {
   generationStage,
   hasUploadedFile,
   hasSelectedChapters,
+  invertChapterSelection,
   isCompactLayout,
   isUploadMode,
   leftSidebarCollapsed,

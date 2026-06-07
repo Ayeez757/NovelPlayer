@@ -1,10 +1,16 @@
 package com.novelplayer.application.generation;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.novelplayer.application.generation.model.ScenePlan;
 import com.novelplayer.application.project.ProjectService;
 import com.novelplayer.domain.generation.GenerationJob;
+import com.novelplayer.domain.generation.GenerationStageResult;
+import com.novelplayer.domain.generation.GenerationStatus;
 import com.novelplayer.domain.project.NovelProject;
 import com.novelplayer.domain.script.ScriptDocumentEntity;
+import com.novelplayer.infra.repository.GenerationStageResultRepository;
 import com.novelplayer.infra.repository.GenerationJobRepository;
+import com.novelplayer.infra.repository.NovelChapterRepository;
 import com.novelplayer.infra.repository.ScriptDocumentRepository;
 import com.novelplayer.web.dto.GenerationJobResponse;
 import com.novelplayer.web.dto.ScriptDocumentResponse;
@@ -29,8 +35,11 @@ public class GenerationJobService {
     private final ProjectService projectService;
     private final GenerationJobRepository jobRepository;
     private final ScriptDocumentRepository scriptDocumentRepository;
+    private final NovelChapterRepository chapterRepository;
+    private final GenerationStageResultRepository stageResultRepository;
     private final GenerationJobExecutor generationJobExecutor;
     private final GenerationJobLifecycleService lifecycleService;
+    private final ObjectMapper objectMapper;
 
     /**
      * 注入生成任务创建、查询和后台执行所需组件。
@@ -41,15 +50,28 @@ public class GenerationJobService {
      * @param generationJobExecutor 后台生成任务执行器。
      * @param lifecycleService 生成任务生命周期服务。
      */
+    /*
+     * 旧构造器没有阶段进度统计所需的依赖：
+     * public GenerationJobService(ProjectService projectService, GenerationJobRepository jobRepository,
+     *                             ScriptDocumentRepository scriptDocumentRepository,
+     *                             GenerationJobExecutor generationJobExecutor,
+     *                             GenerationJobLifecycleService lifecycleService) { ... }
+     */
     public GenerationJobService(ProjectService projectService, GenerationJobRepository jobRepository,
                                 ScriptDocumentRepository scriptDocumentRepository,
+                                NovelChapterRepository chapterRepository,
+                                GenerationStageResultRepository stageResultRepository,
                                 GenerationJobExecutor generationJobExecutor,
-                                GenerationJobLifecycleService lifecycleService) {
+                                GenerationJobLifecycleService lifecycleService,
+                                ObjectMapper objectMapper) {
         this.projectService = projectService;
         this.jobRepository = jobRepository;
         this.scriptDocumentRepository = scriptDocumentRepository;
+        this.chapterRepository = chapterRepository;
+        this.stageResultRepository = stageResultRepository;
         this.generationJobExecutor = generationJobExecutor;
         this.lifecycleService = lifecycleService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -148,8 +170,64 @@ public class GenerationJobService {
      * @param job 生成任务实体。
      * @return 生成任务状态响应。
      */
-    private static GenerationJobResponse toResponse(GenerationJob job) {
+    private GenerationJobResponse toResponse(GenerationJob job) {
+        /*
+         * 旧版响应只返回状态和 currentStage，没有把阶段总量/完成量带出去。
+         * 现在在这里统一组装 progress，避免控制器和前端再各自猜测。
+         */
         return new GenerationJobResponse(job.getId(), job.getProject().getId(), job.getStatus().name(),
-                job.getCurrentStage(), job.getErrorMessage(), job.getCreatedAt(), job.getFinishedAt());
+                job.getCurrentStage(), job.getErrorMessage(), job.getCreatedAt(), job.getFinishedAt(),
+                resolveProgress(job));
+    }
+
+    private GenerationJobResponse.Progress resolveProgress(GenerationJob job) {
+        String stage = job.getCurrentStage();
+        if (stage == null || job.getId() == null) {
+            return null;
+        }
+
+        if (stage.equals(GenerationStageNames.CHAPTER_DIGEST)
+                || stage.startsWith(GenerationStageNames.CHAPTER_DIGEST + ":")) {
+            int total = Math.toIntExact(chapterRepository.countByProjectId(job.getProject().getId()));
+            int completed = Math.toIntExact(stageResultRepository.countByJobIdAndStatusAndStageNameStartingWith(
+                    job.getId(), GenerationStatus.SUCCEEDED, GenerationStageNames.CHAPTER_DIGEST + ":"));
+            int failed = Math.toIntExact(stageResultRepository.countByJobIdAndStatusAndStageNameStartingWith(
+                    job.getId(), GenerationStatus.FAILED, GenerationStageNames.CHAPTER_DIGEST + ":"));
+            return new GenerationJobResponse.Progress(total, completed, failed);
+        }
+
+        if (stage.equals(GenerationStageNames.SCENE_DRAFT)
+                || stage.startsWith(GenerationStageNames.SCENE_DRAFT + ":")) {
+            int total = resolveSceneDraftTotal(job.getId());
+            if (total <= 0) {
+                return null;
+            }
+            int completed = Math.toIntExact(stageResultRepository.countByJobIdAndStatusAndStageNameStartingWith(
+                    job.getId(), GenerationStatus.SUCCEEDED, GenerationStageNames.SCENE_DRAFT + ":"));
+            int failed = Math.toIntExact(stageResultRepository.countByJobIdAndStatusAndStageNameStartingWith(
+                    job.getId(), GenerationStatus.FAILED, GenerationStageNames.SCENE_DRAFT + ":"));
+            return new GenerationJobResponse.Progress(total, completed, failed);
+        }
+
+        return null;
+    }
+
+    private int resolveSceneDraftTotal(Long jobId) {
+        return stageResultRepository
+                .findFirstByJobIdAndStageNameAndStatusOrderByCreatedAtDesc(
+                        jobId, GenerationStageNames.SCENE_PLAN, GenerationStatus.SUCCEEDED)
+                .map(GenerationStageResult::getOutputJson)
+                .map(this::readScenePlanSize)
+                .orElse(0);
+    }
+
+    private int readScenePlanSize(String outputJson) {
+        try {
+            // 这里只为了进度显示读取 scene 数量，解析失败时保守返回 0，不影响主流程。
+            return objectMapper.readValue(outputJson, ScenePlan.class).scenes().size();
+        } catch (Exception exception) {
+            log.warn("Failed to parse scene_plan when resolving generation progress", exception);
+            return 0;
+        }
     }
 }

@@ -205,7 +205,12 @@ public class ScriptAssembler {
      * @return 剧本文档元信息。
      */
     private ScriptDocument.ScriptMetadata buildMetadata(NovelProject project, ScenePlan scenePlan) {
-        int sourceChapterCount = inferSourceChapterCount(scenePlan);
+        /*
+         * 旧逻辑直接取 scenePlan 中出现过的最大章节号。
+         * 当模型把多个原文章节合并/压缩进更少的 scene 时，最大章节号可能小于最小校验值 3，
+         * 从而在最终装配阶段被 ScriptMetadata 的 @Min(3) 卡住。
+         */
+        int sourceChapterCount = Math.max(3, inferSourceChapterCount(scenePlan));
         OffsetDateTime generatedAt = OffsetDateTime.now(clock);
         log.debug("构造剧本文档元信息 projectId={} sourceChapterCount={} generatedAt={}",
                 project.getId(), sourceChapterCount, generatedAt);

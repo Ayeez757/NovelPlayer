@@ -68,7 +68,8 @@ export function useWorkspacePage() {
   let generationPollFailureCount = 0
   let lastLoggedJobProgressKey = ''
 
-  const supportsChapterSelectionSubmission = false
+  // 先把章节选择交互放开，等后端补入参后再把选择同步到请求体。
+  const supportsChapterSelectionSubmission = true
 
   const isUploadMode = computed(() => currentPageType.value === 'upload-convert')
   const hasUploadedFile = computed(() => uploadedFileName.value.length > 0)
@@ -147,6 +148,10 @@ export function useWorkspacePage() {
 
     if (!supportsChapterSelectionSubmission) {
       return '当前会默认按全部章节生成。'
+    }
+
+    if (!selectedChapterCount.value) {
+      return '请至少选择 1 章后再生成。'
     }
 
     if (hasCustomChapterSelection.value) {
@@ -418,8 +423,21 @@ export function useWorkspacePage() {
     syncChapterSelection(project.value.chapters.map((chapter) => chapter.index))
   }
 
+  function invertChapterSelection() {
+    if (!project.value) {
+      return
+    }
+
+    const selectedSet = new Set(selectedChapterIndexes.value)
+    syncChapterSelection(
+      project.value.chapters
+        .map((chapter) => chapter.index)
+        .filter((index) => !selectedSet.has(index))
+    )
+  }
+
   function clearChapterSelection() {
-    selectedChapterIndexes.value = []
+    syncChapterSelection([])
   }
 
   function pauseGenerationPolling() {
@@ -548,7 +566,11 @@ export function useWorkspacePage() {
   function applyGenerationJob(job: GenerationJobResponse) {
     generationJobId.value = job.id
     generationStage.value = normalizeGenerationStage(job)
-    generationMessage.value = describeGenerationJob(job)
+    /*
+     * 旧调用保留原函数名：
+     * generationMessage.value = describeGenerationJob(job)
+     */
+    generationMessage.value = describeGenerationJobStable(job)
 
     const progressKey = `${job.status}:${generationStage.value}:${job.errorMessage || ''}`
     if (progressKey === lastLoggedJobProgressKey) {
@@ -637,6 +659,7 @@ export function useWorkspacePage() {
   }
 
   function buildGenerationPayload(): GenerationRequest {
+    // 后端暂未接收章节选择入参，这里先沿用现有请求结构。
     return {
       ...options
     }
@@ -670,6 +693,7 @@ export function useWorkspacePage() {
     hasUploadedFile,
     isCompactLayout,
     isUploadMode,
+    invertChapterSelection,
     leftSidebarCollapsed,
     loadSourceFile,
     options,
@@ -809,12 +833,20 @@ function normalizeGenerationStage(job: GenerationJobResponse) {
 
 function describeGenerationJob(job: GenerationJobResponse) {
   const stage = normalizeGenerationStage(job)
+  const progressText = job.progress
+    ? `（${job.progress.completed}/${job.progress.total}，失败 ${job.progress.failed}）`
+    : ''
 
   if (job.status === 'PENDING') {
     return '任务已创建，等待后台执行'
   }
 
   if (job.status === 'RUNNING') {
+    /*
+     * 新逻辑把阶段内进度拼进现有文案里。
+     * 旧 return 保留在后面作参考，但不会再执行。
+     */
+    return `姝ｅ湪${getGenerationStageLabel(stage)}${progressText}`
     return `正在${getGenerationStageLabel(stage)}`
   }
 
@@ -823,6 +855,27 @@ function describeGenerationJob(job: GenerationJobResponse) {
   }
 
   return job.errorMessage || '剧本生成失败'
+}
+
+function describeGenerationJobStable(job: GenerationJobResponse) {
+  const stage = normalizeGenerationStage(job)
+  const progressText = job.progress
+    ? ` (${job.progress.completed}/${job.progress.total}, failed ${job.progress.failed})`
+    : ''
+
+  if (job.status === 'PENDING') {
+    return 'Task created, waiting for backend execution'
+  }
+
+  if (job.status === 'RUNNING') {
+    return `Running ${getGenerationStageLabel(stage)}${progressText}`
+  }
+
+  if (job.status === 'SUCCEEDED') {
+    return 'Generation completed, loading latest script'
+  }
+
+  return job.errorMessage || 'Script generation failed'
 }
 
 function getGenerationStageLabel(stage: string) {

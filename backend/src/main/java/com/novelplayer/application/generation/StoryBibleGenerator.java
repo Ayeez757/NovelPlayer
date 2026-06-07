@@ -74,7 +74,15 @@ public class StoryBibleGenerator {
         log.info("开始生成故事圣经 jobId={} projectId={} digestCount={} stageName={} inputHash={}",
                 job.getId(), project.getId(), digests.size(), stageName, inputHash);
 
+//        Optional<StoryBible> cached = stageStore.findSucceeded(job, stageName, inputHash, StoryBible.class);
+        // 用 projectId 查缓存，才能跨 job 复用
+        /*
+         * 之前的改动把这里切成了 projectId 直调版本：
+         * Optional<StoryBible> cached = stageStore.findSucceeded(
+         *         project.getId(), stageName, inputHash, StoryBible.class);
+         */
         Optional<StoryBible> cached = stageStore.findSucceeded(job, stageName, inputHash, StoryBible.class);
+
         if (cached.isPresent()) {
             StoryBible bible = cached.orElseThrow();
             validate(bible);

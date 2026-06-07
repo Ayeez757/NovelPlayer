@@ -22,4 +22,16 @@ public interface GenerationStageResultRepository extends JpaRepository<Generatio
      */
     Optional<GenerationStageResult> findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
             Long jobId, String stageName, GenerationStatus status, String inputHash);
+//    补 3 个方法。这里是跨 job 复用和进度统计的入口。
+    // 按 projectId 查成功阶段结果，这样新建 job 也能复用旧 job 的阶段结果。
+    Optional<GenerationStageResult> findFirstByJobProjectIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
+            Long projectId, String stageName, GenerationStatus status, String inputHash);
+
+    // 统计当前 job 某类前缀阶段的成功/失败数量，给前端 progress 用。
+    long countByJobIdAndStatusAndStageNameStartingWith(
+            Long jobId, GenerationStatus status, String stageNamePrefix);
+
+    // 读取当前 job 最新的 scene_plan 成功结果，用来推算 scene_draft 的 total。
+    Optional<GenerationStageResult> findFirstByJobIdAndStageNameAndStatusOrderByCreatedAtDesc(
+            Long jobId, String stageName, GenerationStatus status);
 }

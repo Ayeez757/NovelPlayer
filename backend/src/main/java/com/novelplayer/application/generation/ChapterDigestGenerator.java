@@ -8,6 +8,7 @@ import com.novelplayer.application.generation.model.ChapterDigest;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.project.NovelChapter;
 import com.novelplayer.domain.project.NovelProject;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +36,13 @@ public class ChapterDigestGenerator {
 
     private final StagedScriptAiClient aiClient;
     private final GenerationStageStore stageStore;
+    /*
+     * 旧的半成品改动重复声明了 aiClient / stageStore，导致类字段重复、无法编译。
+// 新增字段
+    private final StagedScriptAiClient aiClient;
+    private final GenerationStageStore stageStore;
+    */
+    private final ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider;
 
     /**
      * 创建章节摘要阶段生成器。
@@ -42,9 +50,13 @@ public class ChapterDigestGenerator {
      * @param aiClient 阶段化 AI 客户端。
      * @param stageStore 生成阶段结果存取层。
      */
-    public ChapterDigestGenerator(StagedScriptAiClient aiClient, GenerationStageStore stageStore) {
+
+//    构造器扩参
+    public ChapterDigestGenerator(StagedScriptAiClient aiClient, GenerationStageStore stageStore, ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider
+    ) {
         this.aiClient = aiClient;
         this.stageStore = stageStore;
+        this.lifecycleServiceProvider = lifecycleServiceProvider;
     }
 
     /**
@@ -88,6 +100,10 @@ public class ChapterDigestGenerator {
     private ChapterDigest generateOne(GenerationJob job, NovelProject project, NovelChapter chapter,
                                       GenerationOptions options) {
         String stageName = GenerationStageNames.chapterDigest(chapter.getChapterIndex());
+
+        // 把 job 当前阶段推进到 chapter_digest:1 这种细粒度值，让前端看得到
+        moveJobToStage(job, stageName);
+
         String inputHash = stageStore.sha256OfJson(ChapterDigestInput.from(project, chapter, options));
 
         Optional<ChapterDigest> cached = stageStore.findSucceeded(job, stageName, inputHash, ChapterDigest.class);
@@ -110,6 +126,19 @@ public class ChapterDigestGenerator {
             log.warn("章节摘要生成失败 jobId={} projectId={} chapterIndex={} stageName={} error={}",
                     job.getId(), project.getId(), chapter.getChapterIndex(), stageName, exception.getMessage(), exception);
             throw exception;
+        }
+    }
+
+    /**
+     * 尽力把当前细粒度阶段写回任务表，保证前端轮询时能看到 chapter_digest:1 这类阶段名。
+     *
+     * @param job 当前任务。
+     * @param stageName 细粒度阶段名。
+     */
+    private void moveJobToStage(GenerationJob job, String stageName) {
+        GenerationJobLifecycleService lifecycleService = lifecycleServiceProvider.getIfAvailable();
+        if (lifecycleService != null && job.getId() != null) {
+            lifecycleService.moveToStage(job.getId(), stageName);
         }
     }
 

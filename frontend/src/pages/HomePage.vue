@@ -116,7 +116,7 @@ const featureCards: FeatureCard[] = [
   {
     eyebrow: '01 / Entry',
     title: '开始改编',
-    description: '从首页直接进入工作台，页面切换时保留轻一点的浅入浅出。',
+    description: '从首页直接进入工作台，开始书写小说，转换为剧本。',
     tone: 'primary',
     to: '/workspace'
   },

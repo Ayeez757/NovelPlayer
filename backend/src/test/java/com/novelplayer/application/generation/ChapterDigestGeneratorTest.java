@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.lang.reflect.Field;
 import java.util.List;
@@ -39,6 +40,9 @@ class ChapterDigestGeneratorTest {
     @Mock
     private GenerationStageResultRepository repository;
 
+    @Mock
+    private ObjectProvider<GenerationJobLifecycleService> lifecycleServiceProvider;
+
     private GenerationStageStore stageStore;
     private ChapterDigestGenerator generator;
 
@@ -48,7 +52,11 @@ class ChapterDigestGeneratorTest {
     @BeforeEach
     void setUp() {
         stageStore = new GenerationStageStore(repository, new com.fasterxml.jackson.databind.ObjectMapper());
-        generator = new ChapterDigestGenerator(aiClient, stageStore);
+        /*
+         * 旧测试构造器参数只有 2 个：
+         * generator = new ChapterDigestGenerator(aiClient, stageStore);
+         */
+        generator = new ChapterDigestGenerator(aiClient, stageStore, lifecycleServiceProvider);
     }
 
     /**
