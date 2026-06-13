@@ -202,38 +202,46 @@ export function useWorkspacePage() {
     }
   }
 
+  /**
+   * 初始化/重置区块交叉观察器，监听页面可视区块，自动更新当前激活区块ID
+   * 实现滚动时识别屏幕内占比最高的区块，赋值给响应式currentSection
+   */
   function setupSectionObserver() {
+    // 先销毁旧的观察实例，防止重复绑定监听
     sectionObserver?.disconnect()
 
+    // 创建交叉观察器实例
     sectionObserver = new IntersectionObserver(
-      (entries) => {
-        const visibleEntries = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((first, second) => second.intersectionRatio - first.intersectionRatio)
+        // 交叉状态变化回调
+        (entries) => {
+          // 1. 过滤出当前进入可视区域的区块
+          // 2. 按可视占比从大到小排序（可视面积越高越靠前）
+          const visibleEntries = entries
+              .filter((entry) => entry.isIntersecting)
+              .sort((first, second) => second.intersectionRatio - first.intersectionRatio)
 
-        if (!visibleEntries.length) {
-          return
+          // 没有任何可见区块，直接终止逻辑
+          if (!visibleEntries.length) {
+            return
+          }
+
+          // 取出可视占比最高的DOM元素，读取自定义属性data-section-id作为区块标识
+          const nextSection = visibleEntries[0].target.getAttribute('data-section-id') as SectionId | null
+
+          // 拿到合法区块ID则更新全局响应式当前区块
+          if (nextSection) {
+            currentSection.value = nextSection
+          }
+        },
+        {
+          root: null, // 根容器为浏览器视口
+          // 裁剪可视判定区域：上下向内缩进，只识别屏幕中间核心区域
+          // 上边界向内缩18%，下边界向内缩52%，左右无裁剪
+          rootMargin: '-18% 0px -52% 0px',
+          // 触发回调的可视比例阈值：元素露出12%/30%/55%时都会执行回调
+          threshold: [0.12, 0.3, 0.55]
         }
-
-        const nextSection = visibleEntries[0].target.getAttribute('data-section-id') as SectionId | null
-
-        if (nextSection) {
-          currentSection.value = nextSection
-        }
-      },
-      {
-        root: null,
-        rootMargin: '-18% 0px -52% 0px',
-        threshold: [0.12, 0.3, 0.55]
-      }
     )
-
-    contentSections.value.forEach((item) => {
-      const element = observedSections.get(item.id)
-      if (element) {
-        sectionObserver?.observe(element)
-      }
-    })
   }
 
   function scrollToSection(id: SectionId) {
@@ -808,7 +816,8 @@ const generationStageLabels: Record<string, string> = {
   staged_script_generation: '多阶段生成',
   legacy_script_generation: '旧链路生成',
   chapter_digest: '章节摘要',
-  story_bible: '故事圣经',
+  // 只改前端展示文案，内部阶段名 story_bible 保持不变，避免扩大后端改动面。
+  story_bible: '故事设定集',
   scene_plan: '场景规划',
   scene_draft: '分场草稿',
   script_assembly: '最终组装',
@@ -846,7 +855,7 @@ function describeGenerationJob(job: GenerationJobResponse) {
      * 新逻辑把阶段内进度拼进现有文案里。
      * 旧 return 保留在后面作参考，但不会再执行。
      */
-    return `姝ｅ湪${getGenerationStageLabel(stage)}${progressText}`
+    return `正在${getGenerationStageLabel(stage)}${progressText}`
     return `正在${getGenerationStageLabel(stage)}`
   }
 

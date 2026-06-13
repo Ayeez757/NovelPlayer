@@ -53,10 +53,9 @@ final class DeepSeekJsonExtractor {
     DeepSeekJsonExtractor(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
         /*
-         * LLMs occasionally return almost-JSON even when the prompt asks for strict JSON:
-         * single quotes, unquoted field names, comments, or a trailing comma in arrays/objects.
-         * We still parse into JsonNode only, so a small, local lenient mapper improves recovery
-         * without weakening the application's normal ObjectMapper configuration.
+LLM即便在提示词要求严格输出标准 JSON 时，偶尔仍会返回近似 JSON 的非标准格式：
+比如使用单引号、字段名不带双引号、内容带注释、数组 / 对象末尾存在多余逗号等情况。
+我们这里仅需要将返回内容解析为JsonNode节点对象，因此引入一个轻量、局部宽松模式的解析器，既能提升异常内容的兼容容错能力，又不会破坏应用全局默认ObjectMapper的标准严格配置。
          */
         this.lenientObjectMapper = JsonMapper.builder()
                 .enable(JsonReadFeature.ALLOW_SINGLE_QUOTES)

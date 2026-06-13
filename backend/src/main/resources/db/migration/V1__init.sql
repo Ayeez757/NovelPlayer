@@ -26,6 +26,7 @@ CREATE TABLE novel_chapter (
     UNIQUE KEY uk_novel_chapter_project_index (project_id, chapter_index)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+# 剧本生成任务表
 CREATE TABLE generation_job (
     id BIGINT NOT NULL AUTO_INCREMENT,
     project_id BIGINT NOT NULL,

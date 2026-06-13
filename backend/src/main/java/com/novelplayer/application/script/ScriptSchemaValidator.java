@@ -37,7 +37,7 @@ public class ScriptSchemaValidator {
      * @param document 待校验的剧本文档。
      */
     public void validate(ScriptDocument document) {
-        log.debug("Validating script document schemaVersion={} characterCount={} locationCount={} sceneCount={}",
+        log.debug("校验剧本文档的字段约束和跨引用约束。 schemaVersion={} characterCount={} locationCount={} sceneCount={}",
                 document.schemaVersion(), safeSize(document.characters()), safeSize(document.locations()), safeSize(document.scenes()));
         // Bean Validation 负责字段级约束，例如必填、列表长度和字符串格式。
         List<String> errors = validator.validate(document).stream()
@@ -72,11 +72,11 @@ public class ScriptSchemaValidator {
         if (!errors.isEmpty() || !referenceErrors.isEmpty()) {
             List<String> allErrors = new java.util.ArrayList<>(errors);
             allErrors.addAll(referenceErrors);
-            log.warn("Script document validation failed errorCount={} beanValidationErrors={} referenceErrors={}",
+            log.warn("剧本文档校验失败。 errorCount={} beanValidationErrors={} referenceErrors={}",
                     allErrors.size(), errors.size(), referenceErrors.size());
             throw new ScriptValidationException(allErrors);
         }
-        log.debug("Script document validation passed schemaVersion={} sceneCount={}",
+        log.debug("剧本文档校验通过。schemaVersion={} sceneCount={}",
                 document.schemaVersion(), safeSize(document.scenes()));
     }
 

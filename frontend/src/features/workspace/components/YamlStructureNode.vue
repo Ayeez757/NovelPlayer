@@ -38,6 +38,9 @@
           :node="child"
           :depth="depth + 1"
           :direction="direction"
+          :initial-expanded="initialExpanded"
+          :global-expand-token="globalExpandToken"
+          :global-expand-state="globalExpandState"
         />
       </ul>
     </div>
@@ -45,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { YamlTreeNodeModel } from '../model/yamlTree'
 
 defineOptions({
@@ -56,10 +59,30 @@ const props = defineProps<{
   node: YamlTreeNodeModel
   depth: number
   direction: 'left' | 'right'
+  initialExpanded?: boolean
+  globalExpandToken?: number
+  globalExpandState?: boolean
 }>()
 
 const hasChildren = computed(() => (props.node.children?.length ?? 0) > 0)
-const expanded = ref(props.depth < 2)
+
+/*
+ * 旧行为是 `const expanded = ref(props.depth < 2)`，每个节点只按默认层级展开，
+ * 没法响应根节点的“一键展开 / 一键收起”。
+ */
+const expanded = ref(props.initialExpanded ?? props.depth < 2)
+
+watch(
+  () => props.globalExpandToken,
+  () => {
+    if (!hasChildren.value) {
+      return
+    }
+
+    // 响应根节点的全局展开控制，同时保留单个节点的手动切换能力。
+    expanded.value = props.globalExpandState ?? expanded.value
+  }
+)
 </script>
 
 <style scoped>

@@ -1,6 +1,5 @@
 package com.novelplayer.application.generation;
 
-//增加2个import
 import com.novelplayer.ai.StagedScriptAiClient;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import com.novelplayer.application.generation.model.BibleCharacter;
@@ -354,11 +353,11 @@ public class ScriptAssembler {
     }
 
     /**
-     * 校验列表不能为空，并复制为不可变列表。
+     * 校验列表不能为空（转换成Stream 流对象检验）并复制为不可变列表。
      *
      * @param values 原始列表。
      * @param name 参数名称。
-     * @return 不可变列表。
+     * @return 不可变列表。List.copyOf(…) 以及 .toList()
      * @param <T> 列表元素类型。
      */
     private static <T> List<T> requireList(List<T> values, String name) {

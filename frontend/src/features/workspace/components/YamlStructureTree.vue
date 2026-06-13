@@ -7,16 +7,24 @@
 
     <div v-else-if="!rootNode" class="yaml-map__state">
       <h4>等待 YAML 草稿</h4>
-      <p>生成结果出现后，这里会自动整理出人物、地点、场景和正文块的树状结构。</p>
+      <p>生成结果出现后，这里会自动整理出人物、地点、场景和正文块的脑图结构。</p>
     </div>
 
     <div v-else class="yaml-map__canvas">
       <div class="yaml-map__summary">
-        <div>
-          <p class="yaml-map__eyebrow">STRUCTURE MAP</p>
-          <h4>YAML 脑图</h4>
+        <div class="yaml-map__summary-main">
+          <div>
+            <p class="yaml-map__eyebrow">STRUCTURE MAP</p>
+            <h4>YAML 脑图</h4>
+          </div>
+          <div class="yaml-map__actions">
+            <button type="button" class="yaml-map__action" @click="expandAllNodes">全部展开</button>
+            <button type="button" class="yaml-map__action is-secondary" @click="collapseAllNodes">
+              全部收起
+            </button>
+          </div>
         </div>
-        <span>{{ rootNode.meta ?? '值节点' }}</span>
+        <span>{{ rootNode.meta ?? '根节点' }}</span>
       </div>
 
       <div class="yaml-map__viewport">
@@ -28,6 +36,9 @@
               :node="node"
               :depth="1"
               direction="left"
+              :initial-expanded="true"
+              :global-expand-token="globalExpandToken"
+              :global-expand-state="globalExpandState"
             />
           </section>
 
@@ -50,6 +61,9 @@
               :node="node"
               :depth="1"
               direction="right"
+              :initial-expanded="true"
+              :global-expand-token="globalExpandToken"
+              :global-expand-state="globalExpandState"
             />
           </section>
         </div>
@@ -59,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { parseDocument } from 'yaml'
 import YamlStructureNode from './YamlStructureNode.vue'
 import type { YamlTreeNodeModel } from '../model/yamlTree'
@@ -100,20 +114,33 @@ const rootNode = computed(() => parsedState.value.rootNode)
 const parseError = computed(() => parsedState.value.parseError)
 const leftBranches = computed(() => splitBranches().left)
 const rightBranches = computed(() => splitBranches().right)
+const globalExpandToken = ref(0)
+const globalExpandState = ref(false)
 const isCompactMindmap = computed(() => {
   const totalBranches = leftBranches.value.length + rightBranches.value.length
   return totalBranches <= 2
 })
 
-function buildNode(label: string, value: unknown): YamlTreeNodeModel {
+function expandAllNodes() {
+  globalExpandState.value = true
+  globalExpandToken.value += 1
+}
+
+function collapseAllNodes() {
+  globalExpandState.value = false
+  globalExpandToken.value += 1
+}
+
+function buildNode(label: string, value: unknown, parentKey = ''): YamlTreeNodeModel {
   const displayLabel = localizeLabel(label)
 
   if (Array.isArray(value)) {
+    const sourceKey = parentKey || label
     return {
       label: displayLabel,
       kind: 'array',
       meta: `${value.length} 项`,
-      children: value.map((item, index) => buildNode(`[${index}]`, item))
+      children: value.map((item, index) => buildArrayItemNode(sourceKey, item, index))
     }
   }
 
@@ -123,7 +150,7 @@ function buildNode(label: string, value: unknown): YamlTreeNodeModel {
       label: displayLabel,
       kind: 'object',
       meta: `${entries.length} 个字段`,
-      children: entries.map(([key, childValue]) => buildNode(key, childValue))
+      children: entries.map(([key, childValue]) => buildNode(key, childValue, key))
     }
   }
 
@@ -134,9 +161,69 @@ function buildNode(label: string, value: unknown): YamlTreeNodeModel {
   }
 }
 
+function buildArrayItemNode(parentKey: string, value: unknown, index: number): YamlTreeNodeModel {
+  const displayLabel = buildArrayItemLabel(parentKey, value, index)
+
+  if (Array.isArray(value)) {
+    return {
+      label: displayLabel,
+      kind: 'array',
+      meta: `${value.length} 项`,
+      children: value.map((item, childIndex) => buildArrayItemNode(parentKey, item, childIndex))
+    }
+  }
+
+  if (isPlainObject(value)) {
+    const entries = Object.entries(value)
+    return {
+      label: displayLabel,
+      kind: 'object',
+      meta: `${entries.length} 个字段`,
+      children: entries.map(([key, childValue]) => buildNode(key, childValue, key))
+    }
+  }
+
+  return {
+    label: displayLabel,
+    kind: 'value',
+    valueLabel: formatValue(value)
+  }
+}
+
+function buildArrayItemLabel(parentKey: string, value: unknown, index: number) {
+
+  const prefix = yamlArrayItemLabelMap[parentKey] ?? '条目'
+  const primaryLabel = resolvePrimaryItemLabel(parentKey, value)
+  const order = index + 1
+
+  return primaryLabel ? `${prefix} ${order} · ${primaryLabel}` : `${prefix} ${order}`
+}
+
+function resolvePrimaryItemLabel(parentKey: string, value: unknown) {
+  if (typeof value === 'string') {
+    return value.length > 20 ? `${value.slice(0, 20)}...` : value
+  }
+
+  if (!isPlainObject(value)) {
+    return ''
+  }
+
+  const titleCandidateKeys =
+    parentKey === 'blocks' ? ['title', 'name', 'type', 'id'] : ['name', 'title', 'id', 'type']
+
+  for (const key of titleCandidateKeys) {
+    const candidate = value[key]
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim()
+    }
+  }
+
+  return ''
+}
+
 function localizeLabel(label: string) {
   if (label.startsWith('[') && label.endsWith(']')) {
-    return `第 ${label.slice(1, -1)} 项`
+    return `条目 ${Number(label.slice(1, -1)) + 1}`
   }
 
   return yamlLabelMap[label] ?? label
@@ -168,11 +255,14 @@ function formatValue(value: unknown) {
 
 const yamlLabelMap: Record<string, string> = {
   schemaVersion: '结构版本',
+  schema_version: '结构版本',
   metadata: '元信息',
   title: '标题',
   language: '语言',
   sourceChapterCount: '源章节数',
+  source_chapter_count: '源章节数',
   generatedAt: '生成时间',
+  generated_at: '生成时间',
   adaptation: '改编信息',
   format: '剧本类型',
   tone: '风格',
@@ -191,14 +281,41 @@ const yamlLabelMap: Record<string, string> = {
   description: '描述',
   scenes: '场景列表',
   sourceChapters: '来源章节',
+  source_chapters: '来源章节',
   locationId: '地点编号',
+  location_id: '地点编号',
   timeOfDay: '时间段',
+  time_of_day: '时间段',
   dramaticPurpose: '戏剧目的',
+  dramatic_purpose: '戏剧目的',
   summary: '摘要',
   blocks: '正文块',
   speakerId: '说话人编号',
+  speaker_id: '说话人编号',
   text: '内容',
-  revisionNotes: '修订备注'
+  revisionNotes: '修订备注',
+  revision_notes: '修订备注',
+  requiredBeats: '关键节拍',
+  required_beats: '关键节拍'
+}
+
+const yamlArrayItemLabelMap: Record<string, string> = {
+  characters: '人物',
+  locations: '地点',
+  scenes: '场景',
+  blocks: '片段',
+  revisionNotes: '备注',
+  revision_notes: '备注',
+  themes: '主题',
+  aliases: '别名',
+  traits: '特征',
+  sourceChapters: '章节',
+  source_chapters: '章节',
+  requiredBeats: '节拍',
+  required_beats: '节拍',
+  conflicts: '冲突',
+  openThreads: '悬念',
+  open_threads: '悬念'
 }
 
 function splitBranches() {
@@ -240,10 +357,7 @@ function countNodeWeight(node: YamlTreeNodeModel): number {
   return 1 + node.children.reduce((sum, child) => sum + countNodeWeight(child), 0)
 }
 
-function decorateBranch(
-  node: YamlTreeNodeModel,
-  accent: YamlTreeNodeModel['accent']
-): YamlTreeNodeModel {
+function decorateBranch(node: YamlTreeNodeModel, accent: YamlTreeNodeModel['accent']): YamlTreeNodeModel {
   return {
     ...node,
     accent,
@@ -302,6 +416,11 @@ function decorateBranch(
   gap: 16px;
 }
 
+.yaml-map__summary-main {
+  display: grid;
+  gap: 10px;
+}
+
 .yaml-map__summary span {
   display: inline-flex;
   align-items: center;
@@ -312,6 +431,41 @@ function decorateBranch(
   color: #285ea8;
   font-size: 12px;
   font-weight: 700;
+}
+
+.yaml-map__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.yaml-map__action {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid #bedaf2;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff, #eef7ff);
+  color: #24578f;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.yaml-map__action:hover,
+.yaml-map__action:focus-visible {
+  transform: translateY(-1px);
+  border-color: #8cc4eb;
+  box-shadow: 0 10px 20px rgba(37, 87, 143, 0.12);
+}
+
+.yaml-map__action.is-secondary {
+  background: linear-gradient(180deg, #ffffff, #f7f3ff);
+  border-color: #d9caf8;
+  color: #6b53a6;
 }
 
 .yaml-map__eyebrow {

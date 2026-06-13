@@ -34,11 +34,11 @@ public class ScriptJsonMapper {
     public String toJson(ScriptDocument document) {
         try {
             String json = objectMapper.writeValueAsString(document);
-            log.debug("Script document serialized schemaVersion={} jsonLength={}",
+            log.debug("Script document serialized 剧本文档json序列化完成。schemaVersion={} jsonLength={}",
                     document.schemaVersion(), json.length());
             return json;
         } catch (Exception exception) {
-            log.warn("Script document serialization failed schemaVersion={}", document.schemaVersion(), exception);
+            log.warn("Script document serialization failed 剧本文档json序列化失败。schemaVersion={}", document.schemaVersion(), exception);
             throw new IllegalStateException("Failed to serialize script document", exception);
         }
     }

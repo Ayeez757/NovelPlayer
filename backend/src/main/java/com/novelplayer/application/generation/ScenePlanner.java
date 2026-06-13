@@ -1,6 +1,5 @@
 package com.novelplayer.application.generation;
 
-//增加import
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import com.novelplayer.ai.StagedScriptAiClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
@@ -116,6 +115,7 @@ public class ScenePlanner {
      */
     private static void validate(ScenePlan scenePlan, List<ChapterDigest> chapterDigests, StoryBible storyBible) {
         Objects.requireNonNull(scenePlan, "scenePlan must not be null");
+        // set 可以去重，list有 id 顺序
         Set<Integer> availableChapterIndexes = collectChapterIndexes(chapterDigests);
         Set<String> availableCharacterIds = collectCharacterIds(storyBible);
         Set<String> availableLocationIds = collectLocationIds(storyBible);

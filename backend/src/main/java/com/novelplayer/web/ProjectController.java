@@ -48,7 +48,7 @@ public class ProjectController {
      * @param projectId 项目主键。
      * @return 项目状态与章节摘要。
      */
-    @GetMapping("/{projectId}")
+    @GetMapping("/{projectId}") // 水平越权泄露风险（呃 明天考网安 绷不住…）
     public ProjectResponse get(@PathVariable Long projectId) {
         return projectService.get(projectId);
     }

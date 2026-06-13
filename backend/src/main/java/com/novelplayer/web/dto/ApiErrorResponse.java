@@ -19,7 +19,7 @@ public record ApiErrorResponse(
 ) {
 
     /**
-     * 便捷工厂方法，统一设置错误发生时间。
+     * 便捷工厂方法，统一设置错误发生时间。of(…)
      *
      * @param status HTTP 状态码。
      * @param error 错误摘要。
