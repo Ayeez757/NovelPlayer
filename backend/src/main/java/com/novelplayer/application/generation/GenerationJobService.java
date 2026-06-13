@@ -47,6 +47,8 @@ public class GenerationJobService {
      * @param projectService 项目读取服务。
      * @param jobRepository 生成任务仓储。
      * @param scriptDocumentRepository 剧本文档仓储。
+     *                                 章节仓储
+     *                                 阶段结果仓储
      * @param generationJobExecutor 后台生成任务执行器。
      * @param lifecycleService 生成任务生命周期服务。
      */

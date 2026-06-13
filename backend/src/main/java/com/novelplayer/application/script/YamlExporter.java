@@ -40,10 +40,10 @@ public class YamlExporter {
      */
     public String export(ScriptDocument document) {
         try {
-            log.debug("Exporting script document to YAML schemaVersion={} sceneCount={}",
+            log.debug("将已校验剧本文档导出为 YAML 字符串。schemaVersion={} sceneCount={}",
                     document.schemaVersion(), document.scenes().size());
             String yaml = yamlMapper.writeValueAsString(document);
-            log.debug("YAML export completed schemaVersion={} yamlLength={}", document.schemaVersion(), yaml.length());
+            log.debug("YAML 导出完成。 schemaVersion={} yamlLength={}", document.schemaVersion(), yaml.length());
             return yaml;
         } catch (Exception exception) {
             log.warn("YAML export failed schemaVersion={}", document.schemaVersion(), exception);

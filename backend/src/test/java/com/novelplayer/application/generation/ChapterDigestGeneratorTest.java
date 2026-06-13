@@ -31,6 +31,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
+ * 涵盖章节摘要缓存、持久化、失败记录以及可配置的并行执行能力。
  * Covers chapter digest caching, persistence, failure recording and configured parallel execution.
  */
 @ExtendWith(MockitoExtension.class)

@@ -554,7 +554,7 @@ GET /api/generation-jobs/{jobId}
 }
 ```
 
-后续可以扩展 SSE：
+后续可以扩展 SSE（服务端推送事件）：
 
 ```http
 GET /api/generation-jobs/{jobId}/events
