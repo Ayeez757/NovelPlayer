@@ -50,6 +50,11 @@ management:
         include: health,info
 
 novel-player:
+  ai:
+    deepseek:
+      # DeepSeek 专用参数：disabled 会在请求 extraBody 中注入 thinking.type=disabled；
+      # default 则不注入该字段，保留服务端默认行为。
+      thinking-mode: ${NOVEL_PLAYER_DEEPSEEK_THINKING_MODE:disabled}
   generation:
     minimum-chapters: ${NOVEL_PLAYER_MINIMUM_CHAPTERS:3}
     # 生成管线模式：staged 为多阶段生成，legacy 为旧的一次性生成链路。
@@ -57,3 +62,7 @@ novel-player:
     # 默认使用模拟生成，保证没有模型密钥也能启动。
     # 接入 DeepSeek 时改成 false。
     mock-ai: ${NOVEL_PLAYER_MOCK_AI:true}
+    # 章节摘要彼此无依赖，默认有界并行；按模型限流和数据库连接池大小调整。
+    chapter-digest-concurrency: ${NOVEL_PLAYER_CHAPTER_DIGEST_CONCURRENCY:4}
+    # 1 表示严格串行并使用上一场实际生成摘要；大于 1 时使用上一场规划摘要以支持并行。
+    scene-draft-concurrency: ${NOVEL_PLAYER_SCENE_DRAFT_CONCURRENCY:2}

@@ -1,0 +1,55 @@
+# 剧本文档根对象 -> 对应 Java: ScriptDocument
+# 所有字段严格遵循 Jakarta Bean Validation 校验规则
+
+# 文档结构版本 非空必填
+schemaVersion: "1.0"
+
+# 剧本元信息 非空 + 嵌套校验 对应 Java: ScriptMetadata
+metadata:
+  title: ""                # 作品标题 非空必填
+  language: "zh-CN"        # 文档语言 非空必填
+  sourceChapterCount: 3    # 原文章节数量 最小值 3 可改为 ≥3 的任意数字
+  generatedAt: ""          # 生成时间 非空必填 格式：2026-01-01T00:00:00Z
+
+# 改编意图 非空 + 嵌套校验 对应 Java: Adaptation
+adaptation:
+  format: ""               # 剧本形式 如 web_drama 非空必填
+  tone: ""                 # 整体风格 如 suspense 非空必填
+  logline: ""              # 故事一句话梗概 非空必填
+  themes: []               # 主题关键词 可选 可为空数组
+
+# 人物档案列表 非空集合 至少1个 对应 Java: CharacterProfile
+characters:
+  - id: "char_001"         # 人物唯一编号 非空必填
+    name: ""               # 人物姓名 非空必填
+    aliases: []            # 人物别名 可选
+    role: ""               # 角色定位 如 protagonist 非空必填
+    goal: null             # 角色目标 可选
+    traits: []             # 性格特征 可选
+    voice: null            # 语言风格 可选
+
+# 地点档案列表 非空集合 至少1个 对应 Java: LocationProfile
+locations:
+  - id: "loc_001"          # 地点唯一编号 非空必填
+    name: ""               # 地点名称 非空必填
+    type: ""               # 地点类型 如 interior/exterior 非空必填
+    description: ""        # 地点描述 可选
+
+# 场景列表 非空集合 至少1个 对应 Java: Scene
+scenes:
+  - id: "scene_001"        # 场景唯一编号 非空必填
+    title: ""              # 场景标题 非空必填
+    sourceChapters: []     # 对应原文章节编号 非空集合 至少填1个
+    locationId: ""         # 引用地点ID 对应 locations.id 非空必填
+    timeOfDay: ""          # 场景时间 如 night/day 非空必填
+    characters: []         # 出场人物ID列表 非空集合 至少1个
+    dramaticPurpose: ""    # 戏剧目的 非空必填
+    summary: ""            # 场景摘要 非空必填
+    # 场景内容块 非空集合 至少1个 对应 Java: SceneBlock
+    blocks:
+      - type: ""           # 内容块类型 action/dialogue/narration 非空必填
+        speakerId: null    # 说话人ID 仅对白填 其他可为null
+        text: ""           # 内容文本 非空必填
+
+# 修订备注 可选 可为null或空数组
+revisionNotes: []

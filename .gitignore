@@ -26,3 +26,6 @@ data/
 *.mv.db
 *.trace.db
 .github/modernize/
+
+# 本地 demo 录制文稿。
+docs/demo-video-implementation-script.md
