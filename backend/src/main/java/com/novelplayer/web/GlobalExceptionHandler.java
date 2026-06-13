@@ -28,7 +28,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(MethodArgumentNotValidException exception) {
-        // 参数校验错误通常来自请求体字段缺失或取值越界。
+        //  ResponseEntity   Spring 专用 HTTP 响应载体（状态码，响应头，响应体），参数校验错误通常来自请求体字段缺失或取值越界。
         List<String> messages = exception.getBindingResult().getFieldErrors().stream()
                 .map(error -> error.getField() + " " + error.getDefaultMessage())
                 .toList();

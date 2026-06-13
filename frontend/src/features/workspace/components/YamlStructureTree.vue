@@ -191,10 +191,7 @@ function buildArrayItemNode(parentKey: string, value: unknown, index: number): Y
 }
 
 function buildArrayItemLabel(parentKey: string, value: unknown, index: number) {
-  /*
-   * 旧行为是直接把数组元素显示成“第0项 / 第1项”。
-   * 现在改成按上级语义命名，比如“人物 1 · 林安”“场景 1 · 雨夜来信”。
-   */
+
   const prefix = yamlArrayItemLabelMap[parentKey] ?? '条目'
   const primaryLabel = resolvePrimaryItemLabel(parentKey, value)
   const order = index + 1

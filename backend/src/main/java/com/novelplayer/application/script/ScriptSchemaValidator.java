@@ -45,7 +45,7 @@ public class ScriptSchemaValidator {
                 .sorted()
                 .toList();
 
-        // record （记载）注解不适合表达跨集合引用，所以先构建编号集合，再校验场景引用。
+        // record 注解不适合表达跨集合引用，所以先构建编号集合，再校验场景引用。
         Set<String> characterIds = new HashSet<>();
         document.characters().forEach(character -> characterIds.add(character.id()));
         Set<String> locationIds = new HashSet<>();

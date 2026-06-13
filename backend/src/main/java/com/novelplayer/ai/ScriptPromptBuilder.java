@@ -44,6 +44,8 @@ public class ScriptPromptBuilder {
     /**
      * 构建完整模型消息。
      *
+     * 待拆
+     *
      * @param project 小说改编项目。
      * @param chapters 按章节顺序排列的原文。
      * @param options 改编控制选项。
