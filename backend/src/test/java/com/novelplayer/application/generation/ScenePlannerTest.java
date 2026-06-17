@@ -1,13 +1,14 @@
 package com.novelplayer.application.generation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.novelplayer.ai.StagedScriptAiClient;
+import com.novelplayer.ai.LlmJsonClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
 import com.novelplayer.application.generation.model.BibleLocation;
 import com.novelplayer.application.generation.model.ChapterDigest;
 import com.novelplayer.application.generation.model.PlannedScene;
 import com.novelplayer.application.generation.model.ScenePlan;
 import com.novelplayer.application.generation.model.StoryBible;
+import com.novelplayer.application.generation.prompt.ScenePlanPromptBuilder;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.generation.GenerationStageResult;
 import com.novelplayer.domain.generation.GenerationStatus;
@@ -39,7 +40,7 @@ import static org.mockito.Mockito.when;
 class ScenePlannerTest {
 
     @Mock
-    private StagedScriptAiClient aiClient;
+    private LlmJsonClient llmJsonClient;
 
     @Mock
     private GenerationStageResultRepository repository;
@@ -52,8 +53,14 @@ class ScenePlannerTest {
      */
     @BeforeEach
     void setUp() {
-        stageStore = new GenerationStageStore(repository, new ObjectMapper());
-        planner = new ScenePlanner(aiClient, stageStore);
+        ObjectMapper objectMapper = new ObjectMapper();
+        stageStore = new GenerationStageStore(repository, objectMapper);
+        planner = new ScenePlanner(
+                llmJsonClient,
+                objectMapper,
+                stageStore,
+                new ScenePlanPromptBuilder("SYSTEM", "INPUT:\n%s")
+        );
     }
 
     /**
@@ -83,7 +90,7 @@ class ScenePlannerTest {
         ScenePlan result = planner.plan(job, project, digests, bible, options);
 
         assertThat(result).isEqualTo(scenePlan);
-        verify(aiClient, never()).generateScenePlan(any(), any(), any(), any());
+        verify(llmJsonClient, never()).requestJson(any(), any(), any());
     }
 
     /**
@@ -101,7 +108,11 @@ class ScenePlannerTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(21L), eq(GenerationStageNames.SCENE_PLAN), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateScenePlan(project, digests, bible, options)).thenReturn(scenePlan);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.SCENE_PLAN),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(scenePlan));
 
         ScenePlan result = planner.plan(job, project, digests, bible, options);
 
@@ -134,11 +145,16 @@ class ScenePlannerTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(31L), eq(GenerationStageNames.SCENE_PLAN), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateScenePlan(project, digests, bible, options)).thenReturn(invalidPlan);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.SCENE_PLAN),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(invalidPlan));
 
         assertThatThrownBy(() -> planner.plan(job, project, digests, bible, options))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("source chapter");
+                .hasMessageContaining("scene_001")
+                .hasMessageContaining("2");
         ArgumentCaptor<GenerationStageResult> captor = ArgumentCaptor.forClass(GenerationStageResult.class);
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(GenerationStatus.FAILED);
@@ -165,7 +181,11 @@ class ScenePlannerTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(41L), eq(GenerationStageNames.SCENE_PLAN), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateScenePlan(project, digests, bible, options)).thenReturn(invalidPlan);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.SCENE_PLAN),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(invalidPlan));
 
         assertThatThrownBy(() -> planner.plan(job, project, digests, bible, options))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -195,7 +215,11 @@ class ScenePlannerTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(51L), eq(GenerationStageNames.SCENE_PLAN), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateScenePlan(project, digests, bible, options)).thenReturn(invalidPlan);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.SCENE_PLAN),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(invalidPlan));
 
         assertThatThrownBy(() -> planner.plan(job, project, digests, bible, options))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -223,11 +247,15 @@ class ScenePlannerTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(61L), eq(GenerationStageNames.SCENE_PLAN), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateScenePlan(project, digests, bible, options)).thenReturn(invalidPlan);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.SCENE_PLAN),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(invalidPlan));
 
         assertThatThrownBy(() -> planner.plan(job, project, digests, bible, options))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unique");
+                .hasMessageContaining("scene_001");
         ArgumentCaptor<GenerationStageResult> captor = ArgumentCaptor.forClass(GenerationStageResult.class);
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(GenerationStatus.FAILED);
@@ -242,8 +270,7 @@ class ScenePlannerTest {
         NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
 
         assertThatThrownBy(() -> planner.plan(job, project, List.of(), sampleBible(), GenerationOptions.defaults()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("chapterDigests");
+                .isInstanceOf(IllegalArgumentException.class);
         verify(repository, never()).findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 any(), any(), any(), any());
     }

@@ -1,3 +1,13 @@
+/**
+ * 工作区页面组合式函数
+ *
+ * 负责管理工作区页面的核心状态和交互逻辑，包括：
+ * - 文本输入/文件上传
+ * - 章节识别与选择
+ * - 剧本生成流程控制
+ * - 进度轮询与状态管理
+ * - 侧边栏布局控制
+ */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import type { CSSProperties, ComponentPublicInstance } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -27,52 +37,97 @@ import {
   viewModeOptions
 } from '../model/workspaceConfig'
 
+// ==================== 常量定义 ====================
+
+// 生成状态轮询间隔（毫秒）
 const GENERATION_POLL_INTERVAL_MS = 1600
+// 最大连续轮询失败次数
 const MAX_GENERATION_POLL_FAILURES = 3
+// 支持的文件扩展名
 const SUPPORTED_TEXT_FILE_EXTENSIONS = ['txt']
+// 文件选择器接受的文件类型
 const SOURCE_FILE_ACCEPT = '.txt,text/plain'
+// 默认作品标题
 const DEFAULT_TITLE = '未命名作品'
 
+// ==================== 组合式函数主体 ====================
+
 export function useWorkspacePage() {
+  // ---------- 响应式状态 ----------
+
+  // 表单数据（作品标题、正文等）
   const form = reactive(createDefaultForm())
+  // 生成选项配置
   const options = reactive<GenerationRequest>(createDefaultGenerationOptions())
 
+  // 创建作品相关状态
   const creating = ref(false)
+  // 生成中状态
   const generating = ref(false)
+  // 当前项目数据
   const project = ref<ProjectResponse | null>(null)
+  // 当前剧本数据
   const script = ref<ScriptDocumentResponse | null>(null)
+  // YAML 草稿内容
   const yamlDraft = ref('')
+  // 当前生成阶段名称
   const generationStage = ref('')
+  // 当前生成状态消息
   const generationMessage = ref('')
+  // 当前生成任务 ID
   const generationJobId = ref<number | null>(null)
+  // 生成轮询是否暂停
   const generationPollPaused = ref(false)
+  // 生成日志列表
   const generationLogs = ref<GenerationLogItem[]>([])
+  // 已选章节索引列表
   const selectedChapterIndexes = ref<number[]>([])
+  // 上传文件名
   const uploadedFileName = ref('')
+  // 上传文件编码
   const uploadedFileEncoding = ref('')
+  // 上传文件大小
   const uploadedFileSize = ref(0)
 
+  // 当前激活的区块 ID
   const currentSection = ref<SectionId>('text-input')
+  // 当前页面类型（即时写作 / 上传转换）
   const currentPageType = ref<PageType>('instant-write')
+  // 当前视图模式（垂直流式 / 左右分栏）
   const viewMode = ref<ViewMode>('vertical-flow')
 
+  // 工作区容器 DOM 引用
   const workspaceBodyRef = ref<HTMLElement | null>(null)
+  // 左侧边栏是否折叠
   const leftSidebarCollapsed = ref(false)
+  // 左侧边栏宽度
   const leftSidebarWidth = ref(300)
+  // 是否正在拖拽调整左侧边栏
   const isResizingLeftSidebar = ref(false)
+  // 视口宽度
   const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
 
+  // 已观察的区块元素映射
   const observedSections = new Map<SectionId, HTMLElement>()
+  // 区块交叉观察器
   let sectionObserver: IntersectionObserver | null = null
+  // 生成轮询定时器
   let generationPollTimer: ReturnType<typeof setTimeout> | null = null
+  // 生成轮询失败计数
   let generationPollFailureCount = 0
+  // 上次记录的作业进度键
   let lastLoggedJobProgressKey = ''
 
-  // 先把章节选择交互放开，等后端补入参后再把选择同步到请求体。
+  // 后端是否支持章节选择提交（当前为 true）
   const supportsChapterSelectionSubmission = true
 
+  // ---------- 计算属性 ----------
+
+  // 是否为上传模式
   const isUploadMode = computed(() => currentPageType.value === 'upload-convert')
+  // 是否已上传文件
   const hasUploadedFile = computed(() => uploadedFileName.value.length > 0)
+  // 内容区块配置（根据模式动态调整）
   const contentSections = computed(() => {
     return baseContentSections.map((item) => {
       if (item.id !== 'text-input') {
@@ -80,20 +135,25 @@ export function useWorkspacePage() {
       }
 
       return isUploadMode.value
-        ? {
+          ? {
             ...item,
             label: '上传文件',
             hint: '导入 txt 原文'
           }
-        : item
+          : item
     })
   })
+  // 当前区块元信息
   const currentSectionMeta = computed(
-    () => contentSections.value.find((item) => item.id === currentSection.value) ?? contentSections.value[0]
+      () => contentSections.value.find((item) => item.id === currentSection.value) ?? contentSections.value[0]
   )
+  // 当前页面类型标签
   const currentPageTypeLabel = computed(() => pageTypeLabels[currentPageType.value])
+  // 源文本字符数（不含空白）
   const sourceCharacterCount = computed(() => form.sourceText.replace(/\s+/g, '').length)
+  // 总章节数
   const totalChapterCount = computed(() => project.value?.chapters.length ?? 0)
+  // 已选章节数
   const selectedChapterCount = computed(() => {
     if (!project.value) {
       return selectedChapterIndexes.value.length
@@ -105,15 +165,18 @@ export function useWorkspacePage() {
 
     return selectedChapterIndexes.value.length
   })
+  // 是否有已选章节
   const hasSelectedChapters = computed(() => selectedChapterCount.value > 0)
+  // 是否为自定义章节选择
   const hasCustomChapterSelection = computed(() => {
     return (
-      supportsChapterSelectionSubmission &&
-      project.value !== null &&
-      selectedChapterCount.value > 0 &&
-      selectedChapterCount.value < totalChapterCount.value
+        supportsChapterSelectionSubmission &&
+        project.value !== null &&
+        selectedChapterCount.value > 0 &&
+        selectedChapterCount.value < totalChapterCount.value
     )
   })
+  // 已选章节摘要信息
   const selectedChapterSummary = computed(() => {
     if (!project.value) {
       return '等待识别章节'
@@ -121,19 +184,25 @@ export function useWorkspacePage() {
 
     return `${selectedChapterCount.value}/${totalChapterCount.value} 章已选`
   })
+  // 上传文件大小标签
   const uploadedFileSizeLabel = computed(() => formatFileSize(uploadedFileSize.value))
+  // 上传文件编码标签
   const uploadedFileEncodingLabel = computed(() => {
     return uploadedFileEncoding.value ? uploadedFileEncoding.value.toUpperCase() : '未识别'
   })
+  // 是否可以暂停生成
   const canPauseGeneration = computed(
-    () => generating.value && generationJobId.value !== null && !generationPollPaused.value
+      () => generating.value && generationJobId.value !== null && !generationPollPaused.value
   )
+  // 是否可以恢复生成
   const canResumeGeneration = computed(
-    () => generating.value && generationJobId.value !== null && generationPollPaused.value
+      () => generating.value && generationJobId.value !== null && generationPollPaused.value
   )
+  // 生成按钮是否处于加载状态
   const generateButtonLoading = computed(
-    () => generating.value && generationJobId.value !== null && !generationPollPaused.value
+      () => generating.value && generationJobId.value !== null && !generationPollPaused.value
   )
+  // 提交状态标签
   const submitStatusLabel = computed(() => {
     if (!generating.value) {
       return '等待生成'
@@ -141,6 +210,7 @@ export function useWorkspacePage() {
 
     return generationPollPaused.value ? '生成中（已暂停轮询）' : '生成中'
   })
+  // 章节选择提示信息
   const chapterSelectionHint = computed(() => {
     if (!project.value) {
       return '章节识别完成后，这里会展示每章摘要与参与生成范围。'
@@ -160,8 +230,10 @@ export function useWorkspacePage() {
 
     return '当前将按全部已识别章节参与生成。'
   })
+  // 是否为紧凑布局
   const isCompactLayout = computed(() => viewportWidth.value < 1100)
 
+  // 工作区容器样式（动态调整侧边栏宽度）
   const workspaceBodyStyle = computed<CSSProperties | undefined>(() => {
     if (isCompactLayout.value) {
       return undefined
@@ -173,17 +245,21 @@ export function useWorkspacePage() {
     }
   })
 
+  // ---------- 生命周期钩子 ----------
+
   onMounted(() => {
     nextTick(() => {
       setupSectionObserver()
     })
 
+    // 绑定全局事件
     window.addEventListener('pointermove', handleSidebarResize)
     window.addEventListener('pointerup', stopSidebarResize)
     window.addEventListener('resize', handleViewportResize)
   })
 
   onBeforeUnmount(() => {
+    // 清理资源
     stopGenerationPolling()
     sectionObserver?.disconnect()
     window.removeEventListener('pointermove', handleSidebarResize)
@@ -191,6 +267,13 @@ export function useWorkspacePage() {
     window.removeEventListener('resize', handleViewportResize)
   })
 
+  // ---------- 核心方法 ----------
+
+  /**
+   * 设置区块 DOM 引用
+   * @param id 区块 ID
+   * @returns 元素引用回调
+   */
   function setSectionRef(id: SectionId) {
     return (element: Element | ComponentPublicInstance | null) => {
       if (element instanceof HTMLElement) {
@@ -203,47 +286,44 @@ export function useWorkspacePage() {
   }
 
   /**
-   * 初始化/重置区块交叉观察器，监听页面可视区块，自动更新当前激活区块ID
-   * 实现滚动时识别屏幕内占比最高的区块，赋值给响应式currentSection
+   * 初始化区块交叉观察器
+   * 监听页面可视区块，自动更新当前激活区块 ID
+   * 实现滚动时识别屏幕内占比最高的区块
    */
   function setupSectionObserver() {
-    // 先销毁旧的观察实例，防止重复绑定监听
     sectionObserver?.disconnect()
 
-    // 创建交叉观察器实例
     sectionObserver = new IntersectionObserver(
-        // 交叉状态变化回调
         (entries) => {
-          // 1. 过滤出当前进入可视区域的区块
-          // 2. 按可视占比从大到小排序（可视面积越高越靠前）
+          // 过滤出当前进入可视区域的区块，按可视占比从大到小排序
           const visibleEntries = entries
               .filter((entry) => entry.isIntersecting)
               .sort((first, second) => second.intersectionRatio - first.intersectionRatio)
 
-          // 没有任何可见区块，直接终止逻辑
           if (!visibleEntries.length) {
             return
           }
 
-          // 取出可视占比最高的DOM元素，读取自定义属性data-section-id作为区块标识
+          // 取可视占比最高的区块
           const nextSection = visibleEntries[0].target.getAttribute('data-section-id') as SectionId | null
 
-          // 拿到合法区块ID则更新全局响应式当前区块
           if (nextSection) {
             currentSection.value = nextSection
           }
         },
         {
           root: null, // 根容器为浏览器视口
-          // 裁剪可视判定区域：上下向内缩进，只识别屏幕中间核心区域
-          // 上边界向内缩18%，下边界向内缩52%，左右无裁剪
+          // 裁剪可视判定区域：只识别屏幕中间核心区域
           rootMargin: '-18% 0px -52% 0px',
-          // 触发回调的可视比例阈值：元素露出12%/30%/55%时都会执行回调
           threshold: [0.12, 0.3, 0.55]
         }
     )
   }
 
+  /**
+   * 滚动到指定区块
+   * @param id 区块 ID
+   */
   function scrollToSection(id: SectionId) {
     observedSections.get(id)?.scrollIntoView({
       behavior: 'smooth',
@@ -251,10 +331,18 @@ export function useWorkspacePage() {
     })
   }
 
+  /**
+   * 格式化数字为两位数
+   * @param value 数字
+   * @returns 两位数字符串
+   */
   function formatIndex(value: number) {
     return value.toString().padStart(2, '0')
   }
 
+  /**
+   * 恢复默认样例文本
+   */
   function restoreSampleText() {
     clearUploadedFileMeta()
     resetWorkspaceFlow()
@@ -262,12 +350,19 @@ export function useWorkspacePage() {
     ElMessage.success('已恢复默认样例文本')
   }
 
+  /**
+   * 清空源文本
+   */
   function clearSourceText() {
     clearUploadedFileMeta()
     resetWorkspaceFlow()
     form.sourceText = ''
   }
 
+  /**
+   * 加载源文件
+   * @param file 上传的文件
+   */
   async function loadSourceFile(file: File) {
     validateSourceFile(file)
 
@@ -285,9 +380,9 @@ export function useWorkspacePage() {
     form.sourceText = normalizedText
 
     if (
-      !form.title.trim() ||
-      form.title === DEFAULT_TITLE ||
-      (previousImportedTitle && form.title === previousImportedTitle)
+        !form.title.trim() ||
+        form.title === DEFAULT_TITLE ||
+        (previousImportedTitle && form.title === previousImportedTitle)
     ) {
       form.title = nextTitle || DEFAULT_TITLE
     }
@@ -297,17 +392,24 @@ export function useWorkspacePage() {
     uploadedFileSize.value = file.size
 
     appendLog(
-      '文件导入',
-      `已读取《${file.name}》，共 ${sourceCharacterCount.value.toLocaleString('zh-CN')} 字。`,
-      'success'
+        '文件导入',
+        `已读取《${file.name}》，共 ${sourceCharacterCount.value.toLocaleString('zh-CN')} 字。`,
+        'success'
     )
     ElMessage.success(`已导入 ${file.name}，后续流程将按文本模式继续。`)
   }
 
+  /**
+   * 切换页面类型
+   * @param type 页面类型
+   */
   function selectPageType(type: PageType) {
     currentPageType.value = type
   }
 
+  /**
+   * 切换左侧边栏折叠状态
+   */
   function toggleLeftSidebar() {
     if (isCompactLayout.value) {
       return
@@ -316,6 +418,9 @@ export function useWorkspacePage() {
     leftSidebarCollapsed.value = !leftSidebarCollapsed.value
   }
 
+  /**
+   * 创建作品
+   */
   async function create() {
     if (!form.title.trim()) {
       ElMessage.warning('请输入作品标题')
@@ -345,9 +450,9 @@ export function useWorkspacePage() {
       yamlDraft.value = ''
       generationLogs.value = []
       appendLog(
-        '章节识别',
-        `章节识别完成，已载入 ${project.value.chapters.length} 章并默认全选。`,
-        'success'
+          '章节识别',
+          `章节识别完成，已载入 ${project.value.chapters.length} 章并默认全选。`,
+          'success'
       )
       ElMessage.success('章节识别完成')
     } catch (error) {
@@ -359,6 +464,9 @@ export function useWorkspacePage() {
     }
   }
 
+  /**
+   * 生成剧本
+   */
   async function generate() {
     if (!project.value) {
       return
@@ -403,6 +511,9 @@ export function useWorkspacePage() {
     }
   }
 
+  /**
+   * 下载剧本
+   */
   function downloadScript() {
     if (!project.value) {
       return
@@ -411,6 +522,10 @@ export function useWorkspacePage() {
     window.location.href = scriptDownloadUrl(project.value.id)
   }
 
+  /**
+   * 切换章节选择状态
+   * @param index 章节索引
+   */
   function toggleChapterSelection(index: number) {
     const nextSelection = new Set(selectedChapterIndexes.value)
 
@@ -423,6 +538,9 @@ export function useWorkspacePage() {
     syncChapterSelection(Array.from(nextSelection))
   }
 
+  /**
+   * 全选章节
+   */
   function selectAllChapters() {
     if (!project.value) {
       return
@@ -431,6 +549,9 @@ export function useWorkspacePage() {
     syncChapterSelection(project.value.chapters.map((chapter) => chapter.index))
   }
 
+  /**
+   * 反选章节
+   */
   function invertChapterSelection() {
     if (!project.value) {
       return
@@ -438,16 +559,22 @@ export function useWorkspacePage() {
 
     const selectedSet = new Set(selectedChapterIndexes.value)
     syncChapterSelection(
-      project.value.chapters
-        .map((chapter) => chapter.index)
-        .filter((index) => !selectedSet.has(index))
+        project.value.chapters
+            .map((chapter) => chapter.index)
+            .filter((index) => !selectedSet.has(index))
     )
   }
 
+  /**
+   * 清空章节选择
+   */
   function clearChapterSelection() {
     syncChapterSelection([])
   }
 
+  /**
+   * 暂停生成轮询
+   */
   function pauseGenerationPolling() {
     if (!canPauseGeneration.value) {
       return
@@ -459,6 +586,9 @@ export function useWorkspacePage() {
     appendLog('轮询已暂停', '已暂停前端进度轮询，后台任务仍在继续。')
   }
 
+  /**
+   * 恢复生成轮询
+   */
   function resumeGenerationPolling() {
     if (!canResumeGeneration.value || generationJobId.value === null) {
       return
@@ -470,6 +600,10 @@ export function useWorkspacePage() {
     void pollGenerationJob(generationJobId.value)
   }
 
+  /**
+   * 开始拖拽调整左侧边栏
+   * @param event 指针事件
+   */
   function startLeftSidebarResize(event: PointerEvent) {
     if (isCompactLayout.value || leftSidebarCollapsed.value) {
       return
@@ -479,6 +613,10 @@ export function useWorkspacePage() {
     event.preventDefault()
   }
 
+  /**
+   * 处理侧边栏拖拽调整
+   * @param event 指针事件
+   */
   function handleSidebarResize(event: PointerEvent) {
     const rect = workspaceBodyRef.value?.getBoundingClientRect()
 
@@ -489,15 +627,27 @@ export function useWorkspacePage() {
     leftSidebarWidth.value = clampLeftSidebarWidth(event.clientX - rect.left)
   }
 
+  /**
+   * 停止侧边栏拖拽调整
+   */
   function stopSidebarResize() {
     isResizingLeftSidebar.value = false
   }
 
+  /**
+   * 处理视口大小变化
+   */
   function handleViewportResize() {
     viewportWidth.value = window.innerWidth
     leftSidebarWidth.value = clampLeftSidebarWidth(leftSidebarWidth.value)
   }
 
+  /**
+   * 追加生成日志
+   * @param stage 阶段名称
+   * @param message 日志消息
+   * @param level 日志级别
+   */
   function appendLog(stage: string, message: string, level: GenerationLogItem['level'] = 'info') {
     generationLogs.value.unshift({
       id: Date.now() + generationLogs.value.length,
@@ -508,6 +658,9 @@ export function useWorkspacePage() {
     })
   }
 
+  /**
+   * 停止生成轮询
+   */
   function stopGenerationPolling() {
     if (generationPollTimer !== null) {
       clearTimeout(generationPollTimer)
@@ -515,6 +668,10 @@ export function useWorkspacePage() {
     }
   }
 
+  /**
+   * 调度生成轮询
+   * @param jobId 任务 ID
+   */
   function scheduleGenerationPoll(jobId: number) {
     stopGenerationPolling()
     generationPollTimer = setTimeout(() => {
@@ -522,6 +679,10 @@ export function useWorkspacePage() {
     }, GENERATION_POLL_INTERVAL_MS)
   }
 
+  /**
+   * 轮询生成任务状态
+   * @param jobId 任务 ID
+   */
   async function pollGenerationJob(jobId: number) {
     try {
       const job = await getGenerationJob(jobId)
@@ -571,13 +732,13 @@ export function useWorkspacePage() {
     }
   }
 
+  /**
+   * 应用生成任务状态
+   * @param job 任务响应
+   */
   function applyGenerationJob(job: GenerationJobResponse) {
     generationJobId.value = job.id
     generationStage.value = normalizeGenerationStage(job)
-    /*
-     * 旧调用保留原函数名：
-     * generationMessage.value = describeGenerationJob(job)
-     */
     generationMessage.value = describeGenerationJobStable(job)
 
     const progressKey = `${job.status}:${generationStage.value}:${job.errorMessage || ''}`
@@ -587,12 +748,16 @@ export function useWorkspacePage() {
 
     lastLoggedJobProgressKey = progressKey
     appendLog(
-      getGenerationStageLabel(generationStage.value),
-      generationMessage.value,
-      job.status === 'FAILED' ? 'error' : job.status === 'SUCCEEDED' ? 'success' : 'info'
+        getGenerationStageLabel(generationStage.value),
+        generationMessage.value,
+        job.status === 'FAILED' ? 'error' : job.status === 'SUCCEEDED' ? 'success' : 'info'
     )
   }
 
+  /**
+   * 完成生成任务
+   * @param job 任务响应
+   */
   async function completeGenerationJob(job: GenerationJobResponse) {
     stopGenerationPolling()
     generationStage.value = 'completed'
@@ -622,6 +787,10 @@ export function useWorkspacePage() {
     }
   }
 
+  /**
+   * 处理生成任务失败
+   * @param message 错误消息
+   */
   function failGenerationJob(message: string) {
     stopGenerationPolling()
     generationStage.value = 'failed'
@@ -632,6 +801,9 @@ export function useWorkspacePage() {
     ElMessage.error(message)
   }
 
+  /**
+   * 重置工作区流程状态
+   */
   function resetWorkspaceFlow() {
     stopGenerationPolling()
     creating.value = false
@@ -649,12 +821,19 @@ export function useWorkspacePage() {
     lastLoggedJobProgressKey = ''
   }
 
+  /**
+   * 清空上传文件元信息
+   */
   function clearUploadedFileMeta() {
     uploadedFileName.value = ''
     uploadedFileEncoding.value = ''
     uploadedFileSize.value = 0
   }
 
+  /**
+   * 同步章节选择状态
+   * @param indexes 选中的章节索引列表
+   */
   function syncChapterSelection(indexes: number[]) {
     if (!project.value) {
       selectedChapterIndexes.value = indexes
@@ -666,12 +845,17 @@ export function useWorkspacePage() {
     selectedChapterIndexes.value = availableIndexes.filter((index) => selectedSet.has(index))
   }
 
+  /**
+   * 构建生成请求载荷
+   * @returns 生成请求对象
+   */
   function buildGenerationPayload(): GenerationRequest {
-    // 后端暂未接收章节选择入参，这里先沿用现有请求结构。
     return {
       ...options
     }
   }
+
+  // ---------- 返回值 ----------
 
   return {
     canPauseGeneration,
@@ -735,11 +919,22 @@ export function useWorkspacePage() {
   }
 }
 
+// ==================== 工具函数 ====================
+
+/**
+ * 限制左侧边栏宽度在合理范围内
+ * @param value 当前宽度值
+ * @returns 限制后的宽度值
+ */
 function clampLeftSidebarWidth(value: number) {
   const maxWidth = Math.max(280, Math.floor(window.innerWidth * 0.36))
   return Math.min(Math.max(value, 260), maxWidth)
 }
 
+/**
+ * 格式化当前时间为字符串
+ * @returns 格式化后的时间字符串
+ */
 function formatTime() {
   return new Date().toLocaleTimeString('zh-CN', {
     hour: '2-digit',
@@ -749,10 +944,20 @@ function formatTime() {
   })
 }
 
+/**
+ * 从错误对象中提取错误消息
+ * @param error 错误对象
+ * @returns 错误消息字符串
+ */
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '发生了未知错误'
 }
 
+/**
+ * 校验源文件是否有效
+ * @param file 待校验的文件
+ * @throws 当文件格式不支持或为空时抛出
+ */
 function validateSourceFile(file: File) {
   const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
 
@@ -765,6 +970,11 @@ function validateSourceFile(file: File) {
   }
 }
 
+/**
+ * 解码文本缓冲区
+ * @param buffer 文件缓冲区
+ * @returns 解码后的文本和编码格式
+ */
 function decodeTextBuffer(buffer: ArrayBuffer) {
   const encodings = ['utf-8', 'gb18030']
 
@@ -783,14 +993,29 @@ function decodeTextBuffer(buffer: ArrayBuffer) {
   }
 }
 
+/**
+ * 规范化源文本（去除 BOM、统一换行符）
+ * @param value 原始文本
+ * @returns 规范化后的文本
+ */
 function normalizeSourceText(value: string) {
   return value.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
 
+/**
+ * 去除文件名的扩展名
+ * @param fileName 文件名
+ * @returns 去除扩展名后的文件名
+ */
 function stripFileExtension(fileName: string) {
   return fileName.replace(/\.[^.]+$/, '')
 }
 
+/**
+ * 格式化文件大小
+ * @param value 文件大小（字节）
+ * @returns 格式化后的文件大小字符串
+ */
 function formatFileSize(value: number) {
   if (value <= 0) {
     return '0 B'
@@ -809,6 +1034,11 @@ function formatFileSize(value: number) {
   return `${size.toFixed(digits)} ${units[unitIndex]}`
 }
 
+// ==================== 阶段标签映射 ====================
+
+/**
+ * 生成阶段名称到显示标签的映射
+ */
 const generationStageLabels: Record<string, string> = {
   created: '任务已创建',
   generation_input: '记录输入快照',
@@ -816,8 +1046,7 @@ const generationStageLabels: Record<string, string> = {
   staged_script_generation: '多阶段生成',
   legacy_script_generation: '旧链路生成',
   chapter_digest: '章节摘要',
-  // 只改前端展示文案，内部阶段名 story_bible 保持不变，避免扩大后端改动面。
-  story_bible: '故事设定集',
+  story_bible: '故事设定集', // 只改前端展示文案，内部阶段名保持不变
   scene_plan: '场景规划',
   scene_draft: '分场草稿',
   script_assembly: '最终组装',
@@ -828,6 +1057,11 @@ const generationStageLabels: Record<string, string> = {
   failed: '失败'
 }
 
+/**
+ * 规范化生成阶段名称
+ * @param job 任务响应
+ * @returns 规范化后的阶段名称
+ */
 function normalizeGenerationStage(job: GenerationJobResponse) {
   if (job.status === 'SUCCEEDED') {
     return 'completed'
@@ -840,53 +1074,11 @@ function normalizeGenerationStage(job: GenerationJobResponse) {
   return job.currentStage?.trim() || 'created'
 }
 
-function describeGenerationJob(job: GenerationJobResponse) {
-  const stage = normalizeGenerationStage(job)
-  const progressText = job.progress
-    ? `（${job.progress.completed}/${job.progress.total}，失败 ${job.progress.failed}）`
-    : ''
-
-  if (job.status === 'PENDING') {
-    return '任务已创建，等待后台执行'
-  }
-
-  if (job.status === 'RUNNING') {
-    /*
-     * 新逻辑把阶段内进度拼进现有文案里。
-     * 旧 return 保留在后面作参考，但不会再执行。
-     */
-    return `正在${getGenerationStageLabel(stage)}${progressText}`
-    return `正在${getGenerationStageLabel(stage)}`
-  }
-
-  if (job.status === 'SUCCEEDED') {
-    return '生成完成，正在读取最新剧本'
-  }
-
-  return job.errorMessage || '剧本生成失败'
-}
-
-function describeGenerationJobStable(job: GenerationJobResponse) {
-  const stage = normalizeGenerationStage(job)
-  const progressText = job.progress
-    ? ` (${job.progress.completed}/${job.progress.total}, failed ${job.progress.failed})`
-    : ''
-
-  if (job.status === 'PENDING') {
-    return 'Task created, waiting for backend execution'
-  }
-
-  if (job.status === 'RUNNING') {
-    return `Running ${getGenerationStageLabel(stage)}${progressText}`
-  }
-
-  if (job.status === 'SUCCEEDED') {
-    return 'Generation completed, loading latest script'
-  }
-
-  return job.errorMessage || 'Script generation failed'
-}
-
+/**
+ * 获取生成阶段显示标签
+ * @param stage 阶段名称
+ * @returns 显示标签
+ */
 function getGenerationStageLabel(stage: string) {
   if (stage.startsWith('chapter_digest:')) {
     return `章节摘要 ${stage.slice('chapter_digest:'.length)}`
@@ -897,4 +1089,30 @@ function getGenerationStageLabel(stage: string) {
   }
 
   return generationStageLabels[stage] || stage || '未知阶段'
+}
+
+/**
+ * 描述生成任务状态（中文版本）
+ * @param job 任务响应
+ * @returns 状态描述
+ */
+function describeGenerationJobStable(job: GenerationJobResponse) {
+  const stage = normalizeGenerationStage(job)
+  const progressText = job.progress
+      ? ` (${job.progress.completed}/${job.progress.total}，失败 ${job.progress.failed})`
+      : ''
+
+  if (job.status === 'PENDING') {
+    return '任务已创建，等待后台执行'
+  }
+
+  if (job.status === 'RUNNING') {
+    return `正在${getGenerationStageLabel(stage)}${progressText}`
+  }
+
+  if (job.status === 'SUCCEEDED') {
+    return '生成完成，正在加载最新剧本'
+  }
+
+  return job.errorMessage || '剧本生成失败'
 }

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -53,6 +54,7 @@ public class DeepSeekLlmJsonClient implements LlmJsonClient {
      * @param objectMapper        Jackson JSON 序列化工具
      * @param chatOptionsFactory  DeepSeek 对话参数配置工厂
      */
+    @Autowired
     public DeepSeekLlmJsonClient(ChatClient.Builder chatClientBuilder,
                                  ObjectMapper objectMapper,
                                  DeepSeekChatOptionsFactory chatOptionsFactory) {

@@ -46,7 +46,7 @@
     "text submit result"
     "chapter stream result"
     "map map map";
-  align-items: start;
+  align-items: stretch;
 }
 
 .workspace-center.is-horizontal-compare [data-section-id='text-input'] {

@@ -1,17 +1,22 @@
 package com.novelplayer.application.generation;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import com.novelplayer.ai.StagedScriptAiClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.novelplayer.ai.LlmJsonClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
 import com.novelplayer.application.generation.model.BibleLocation;
 import com.novelplayer.application.generation.model.ChapterDigest;
 import com.novelplayer.application.generation.model.PlannedScene;
 import com.novelplayer.application.generation.model.ScenePlan;
 import com.novelplayer.application.generation.model.StoryBible;
+import com.novelplayer.application.generation.prompt.ScenePlanPromptBuilder;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.project.NovelProject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -22,43 +27,64 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 场景规划阶段生成器。
+ * 场景规划阶段生成器（基于 LLM JSON 客户端）。
  *
- * <p>该阶段只负责把章节摘要和故事圣经规划为剧本场景结构，不生成动作、对白等正文内容。
- * 它会校验场景对章节、人物和地点的引用，避免后续分场草稿阶段拿到不可落地的结构蓝图。</p>
+ * <p>该实现通过 {@link LlmJsonClient} 直接与大语言模型交互，生成器自身负责提示词构建、JSON 响应解析和数据规范化。场景规划将多个章节的摘要内容重新组织为可表演的场景列表，每个场景可能覆盖一个或多个章节的核心冲突。</p>
+ *
+ *  * 负责自己本阶段的：
+ *  * 组装阶段输入
+ *  * 构造 prompt
+ *  * 调 LlmJsonClient.requestJson(...)
+ *  * 自己做 JSON 映射、normalize、validate
+ *
+ * <p>场景规划依赖全部章节摘要和故事圣经作为输入，生成的场景 ID、角色 ID 和地点 ID
+ * 必须与故事圣经保持一致。</p>
+ *
+ * @see LlmJsonClient
+ * @see ScenePlan
+ * @see StoryBible
  */
 @Service
-//增加注解
-@ConditionalOnBean(StagedScriptAiClient.class)
+@ConditionalOnBean(LlmJsonClient.class)
 @ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
         matchIfMissing = true)
 public class ScenePlanner {
 
+    /**
+     * 阶段化系统提示词，要求大语言模型只输出合法 JSON。
+     * 同时要求角色 ID 和地点 ID 必须引用故事圣经中已存在的值。
+     */
+    private final ScenePlanPromptBuilder promptBuilder;
     private static final Logger log = LoggerFactory.getLogger(ScenePlanner.class);
 
-    private final StagedScriptAiClient aiClient;
     private final GenerationStageStore stageStore;
 
-    /**
-     * 创建场景规划阶段生成器。
-     *
-     * @param aiClient 阶段化 AI 客户端。
-     * @param stageStore 生成阶段结果存取层。
-     */
-    public ScenePlanner(StagedScriptAiClient aiClient, GenerationStageStore stageStore) {
-        this.aiClient = aiClient;
-        this.stageStore = stageStore;
+    private final LlmJsonClient llmJsonClient;
+    private final ObjectMapper objectMapper;
+
+    public ScenePlanner(LlmJsonClient llmJsonClient,
+                        ObjectMapper objectMapper,
+                        GenerationStageStore stageStore,
+                        ScenePlanPromptBuilder promptBuilder) {
+        this.llmJsonClient = Objects.requireNonNull(llmJsonClient, "llmJsonClient must not be null");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.stageStore = Objects.requireNonNull(stageStore, "stageStore must not be null");
+        this.promptBuilder = Objects.requireNonNull(promptBuilder, "promptBuilder must not be null");
     }
 
     /**
      * 生成或复用场景规划。
      *
+     * <p>场景规划是根据章节摘要和故事圣经，将叙事内容组织为可表演的场景列表。
+     * 该方法会先检查是否已存在相同输入的缓存结果，若存在则直接复用，
+     * 否则调用大语言模型生成新的场景规划并持久化。</p>
+     *
      * @param job 当前生成任务，必须已经持久化。
      * @param project 小说改编项目。
-     * @param chapterDigests 按章节顺序排列的章节摘要。
-     * @param storyBible 全局故事圣经。
+     * @param chapterDigests 按章节顺序排列的章节摘要列表。
+     * @param storyBible 故事圣经，包含全局角色和场景定义。
      * @param options 生成参数。
-     * @return 场景规划结果，只包含结构大纲，不包含正文。
+     * @return 场景规划对象。
      */
     public ScenePlan plan(GenerationJob job, NovelProject project, List<ChapterDigest> chapterDigests,
                           StoryBible storyBible, GenerationOptions options) {
@@ -74,15 +100,7 @@ public class ScenePlanner {
                 job.getId(), project.getId(), digests.size(), storyBible.characters().size(),
                 storyBible.locations().size(), stageName, inputHash);
 
-//        Optional<ScenePlan> cached = stageStore.findSucceeded(job, stageName, inputHash, ScenePlan.class);
-        // 用 projectId 查缓存，才能跨 job 复用
-        /*
-         * 之前的改动把这里切成了 projectId 直调版本：
-         * Optional<ScenePlan> cached = stageStore.findSucceeded(
-         *         project.getId(), stageName, inputHash, ScenePlan.class);
-         */
         Optional<ScenePlan> cached = stageStore.findSucceeded(job, stageName, inputHash, ScenePlan.class);
-
         if (cached.isPresent()) {
             ScenePlan scenePlan = cached.orElseThrow();
             validate(scenePlan, digests, storyBible);
@@ -92,7 +110,7 @@ public class ScenePlanner {
         }
 
         try {
-            ScenePlan scenePlan = aiClient.generateScenePlan(project, digests, storyBible, options);
+            ScenePlan scenePlan = requestScenePlan(project, digests, storyBible, options);
             validate(scenePlan, digests, storyBible);
             stageStore.saveSucceeded(job, stageName, inputHash, scenePlan);
             log.info("场景规划生成并保存成功 jobId={} projectId={} sceneCount={} coveredChapterCount={}",
@@ -107,14 +125,113 @@ public class ScenePlanner {
     }
 
     /**
-     * 校验场景规划和当前章节摘要、故事圣经之间的一致性。
+     * 调用大语言模型生成场景规划。
      *
-     * @param scenePlan 待校验的场景规划。
-     * @param chapterDigests 当前输入章节摘要。
-     * @param storyBible 当前故事圣经。
+     * <p>该方法构建提示词调用 LLM JSON 客户端，获取 JSON 响应后进行数据规范化，
+     * 最终反序列化为 {@link ScenePlan} 对象。</p>
+     *
+     * @param project 小说改编项目。
+     * @param chapterDigests 章节摘要列表。
+     * @param storyBible 故事圣经。
+     * @param options 生成参数。
+     * @return 场景规划对象。
+     */
+    private ScenePlan requestScenePlan(NovelProject project, List<ChapterDigest> chapterDigests,
+                                       StoryBible storyBible, GenerationOptions options) {
+        String inputJson = StageJsonSupport.toPrettyJson(
+                objectMapper,
+                ScenePlanInput.from(project, chapterDigests, storyBible, options)
+        );
+
+        ScenePlanPromptBuilder.PromptMessages prompt = promptBuilder.build(inputJson);
+
+        String json = llmJsonClient.requestJson(
+                GenerationStageNames.SCENE_PLAN,
+                prompt.systemPrompt(),
+                prompt.userPrompt()
+        );
+
+        ObjectNode root = StageJsonSupport.readObject(objectMapper, GenerationStageNames.SCENE_PLAN, json);
+        normalizeScenePlan(root, chapterDigests, storyBible);
+        return StageJsonSupport.treeToValue(objectMapper, "场景规划", root, ScenePlan.class);
+    }
+
+    /**
+     * 规范化 AI 返回的场景规划 JSON 数据。
+
+     * @param root 待规范化的 JSON 根节点。
+     * @param chapterDigests 章节摘要列表，用于合成默认数据。
+     * @param storyBible 故事圣经，用于获取角色和场景的默认值。
+     */
+    private void normalizeScenePlan(ObjectNode root, List<ChapterDigest> chapterDigests, StoryBible storyBible) {
+        ArrayNode scenesNode = StageJsonSupport.ensureArray(objectMapper, root, "scenes");
+
+        if (scenesNode.isEmpty()) {
+            for (int i = 0; i < chapterDigests.size(); i++) {
+                ChapterDigest digest = chapterDigests.get(i);
+                ObjectNode sceneNode = scenesNode.addObject();
+                sceneNode.put("id", "scene_%03d".formatted(i + 1));
+                sceneNode.put("title", digest.title());
+                ArrayNode sourceChapters = sceneNode.putArray("sourceChapters");
+                sourceChapters.add(digest.chapterIndex());
+                sceneNode.put("locationId", storyBible.locations().getFirst().id());
+                sceneNode.put("timeOfDay", i == 0 ? "night" : "day");
+                ArrayNode characters = sceneNode.putArray("characters");
+                storyBible.characters().stream().limit(2).map(BibleCharacter::id).forEach(characters::add);
+                sceneNode.put("dramaticPurpose", "推进改编主冲突。");
+                sceneNode.put("summary", digest.summary());
+                ArrayNode requiredBeats = sceneNode.putArray("requiredBeats");
+                digest.majorEvents().forEach(requiredBeats::add);
+                if (requiredBeats.isEmpty()) {
+                    requiredBeats.add("保留该章最强的一处戏剧冲突。");
+                }
+            }
+        } else {
+            for (int i = 0; i < scenesNode.size(); i++) {
+                ChapterDigest digest = chapterDigests.get(Math.min(i, chapterDigests.size() - 1));
+                JsonNode item = scenesNode.get(i);
+                if (item instanceof ObjectNode sceneNode) {
+                    StageJsonSupport.putIfBlank(sceneNode, "id", "scene_%03d".formatted(i + 1));
+                    StageJsonSupport.putIfBlank(sceneNode, "title", digest.title());
+
+                    ArrayNode sourceChapters = StageJsonSupport.ensureArray(objectMapper, sceneNode, "sourceChapters");
+                    if (sourceChapters.isEmpty()) {
+                        sourceChapters.add(digest.chapterIndex());
+                    }
+
+                    StageJsonSupport.putIfBlank(sceneNode, "locationId", storyBible.locations().getFirst().id());
+                    StageJsonSupport.putIfBlank(sceneNode, "timeOfDay", i == 0 ? "night" : "day");
+
+                    ArrayNode characters = StageJsonSupport.ensureArray(objectMapper, sceneNode, "characters");
+                    if (characters.isEmpty()) {
+                        storyBible.characters().stream().limit(2).map(BibleCharacter::id).forEach(characters::add);
+                    }
+
+                    StageJsonSupport.putIfBlank(sceneNode, "dramaticPurpose", "推进改编主冲突。");
+                    StageJsonSupport.putIfBlank(sceneNode, "summary", digest.summary());
+
+                    ArrayNode requiredBeats = StageJsonSupport.ensureArray(objectMapper, sceneNode, "requiredBeats");
+                    if (requiredBeats.isEmpty()) {
+                        digest.majorEvents().forEach(requiredBeats::add);
+                        if (requiredBeats.isEmpty()) {
+                            requiredBeats.add("保留该章最强的一处戏剧冲突。");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 校验场景规划的数据完整性。
+     *
+     * @param scenePlan 待校验的场景规划对象。
+     * @param chapterDigests 章节摘要列表，用于校验章节索引。
+     * @param storyBible 故事圣经，用于校验角色和场景 ID。
+     * @throws IllegalArgumentException 当数据不符合规范时抛出。
      */
     private static void validate(ScenePlan scenePlan, List<ChapterDigest> chapterDigests, StoryBible storyBible) {
-        Objects.requireNonNull(scenePlan, "scenePlan must not be null");
+        Objects.requireNonNull(scenePlan, "场景规划不能为空");
         // set 可以去重，list有 id 顺序
         Set<Integer> availableChapterIndexes = collectChapterIndexes(chapterDigests);
         Set<String> availableCharacterIds = collectCharacterIds(storyBible);
@@ -132,25 +249,27 @@ public class ScenePlanner {
     /**
      * 校验场景编号不重复。
      *
-     * @param scene 待校验场景。
-     * @param sceneIds 已出现的场景编号集合。
+     * @param scene 待校验的场景。
+     * @param sceneIds 已收集的场景 ID 集合。
+     * @throws IllegalArgumentException 当场景 ID 重复时抛出。
      */
     private static void validateSceneId(PlannedScene scene, Set<String> sceneIds) {
         if (!sceneIds.add(scene.id())) {
-            throw new IllegalArgumentException("scene id must be unique: " + scene.id());
+            throw new IllegalArgumentException("场景 ID 必须唯一：" + scene.id());
         }
     }
 
     /**
-     * 校验场景引用的原文章节都存在于当前章节摘要集合中。
+     * 校验场景引用的章节索引是否存在于章节摘要中。
      *
-     * @param scene 待校验场景。
-     * @param availableChapterIndexes 可引用的章节编号集合。
+     * @param scene 待校验的场景。
+     * @param availableChapterIndexes 可用的章节索引集合。
+     * @throws IllegalArgumentException 当章节索引不存在时抛出。
      */
     private static void validateSourceChapters(PlannedScene scene, Set<Integer> availableChapterIndexes) {
         for (Integer chapterIndex : scene.sourceChapters()) {
             if (!availableChapterIndexes.contains(chapterIndex)) {
-                throw new IllegalArgumentException("scene source chapter must exist in chapter digests: "
+                throw new IllegalArgumentException("场景引用的章节必须存在于章节摘要中："
                         + scene.id() + " -> " + chapterIndex);
             }
         }
@@ -159,12 +278,13 @@ public class ScenePlanner {
     /**
      * 校验场景引用的地点存在于故事圣经地点表。
      *
-     * @param scene 待校验场景。
-     * @param availableLocationIds 可引用的地点编号集合。
+     * @param scene 待校验的场景。
+     * @param availableLocationIds 可用的地点 ID 集合。
+     * @throws IllegalArgumentException 当地点 ID 不存在时抛出。
      */
     private static void validateLocation(PlannedScene scene, Set<String> availableLocationIds) {
         if (!availableLocationIds.contains(scene.locationId())) {
-            throw new IllegalArgumentException("scene location must exist in story bible: "
+            throw new IllegalArgumentException("场景引用的地点必须存在于故事圣经中："
                     + scene.id() + " -> " + scene.locationId());
         }
     }
@@ -172,94 +292,102 @@ public class ScenePlanner {
     /**
      * 校验场景出场人物都存在于故事圣经人物表。
      *
-     * @param scene 待校验场景。
-     * @param availableCharacterIds 可引用的人物编号集合。
+     * @param scene 待校验的场景。
+     * @param availableCharacterIds 可用的角色 ID 集合。
+     * @throws IllegalArgumentException 当角色 ID 不存在时抛出。
      */
     private static void validateCharacters(PlannedScene scene, Set<String> availableCharacterIds) {
         for (String characterId : scene.characters()) {
             if (!availableCharacterIds.contains(characterId)) {
-                throw new IllegalArgumentException("scene character must exist in story bible: "
+                throw new IllegalArgumentException("场景引用的角色必须存在于故事圣经中："
                         + scene.id() + " -> " + characterId);
             }
         }
     }
 
     /**
-     * 收集当前章节摘要中真实可引用的章节编号。
+     * 收集章节摘要中的所有章节索引，并校验唯一性。
      *
      * @param chapterDigests 章节摘要列表。
-     * @return 章节编号集合。
+     * @return 章节索引的不可变集合。
+     * @throws IllegalArgumentException 当章节索引重复时抛出。
      */
     private static Set<Integer> collectChapterIndexes(List<ChapterDigest> chapterDigests) {
         Set<Integer> chapterIndexes = new HashSet<>();
         for (ChapterDigest digest : chapterDigests) {
             if (!chapterIndexes.add(digest.chapterIndex())) {
-                throw new IllegalArgumentException("chapter digest index must be unique: " + digest.chapterIndex());
+                throw new IllegalArgumentException("章节摘要的索引必须唯一：" + digest.chapterIndex());
             }
         }
         return chapterIndexes;
     }
 
     /**
-     * 收集故事圣经中可引用的人物编号。
+     * 收集故事圣经中的所有角色 ID，并校验唯一性。
      *
      * @param storyBible 故事圣经。
-     * @return 人物编号集合。
+     * @return 角色 ID 的不可变集合。
+     * @throws IllegalArgumentException 当角色 ID 重复时抛出。
      */
     private static Set<String> collectCharacterIds(StoryBible storyBible) {
         Set<String> characterIds = new HashSet<>();
         for (BibleCharacter character : storyBible.characters()) {
             if (!characterIds.add(character.id())) {
-                throw new IllegalArgumentException("story bible character id must be unique: " + character.id());
+                throw new IllegalArgumentException("故事圣经中的角色 ID 必须唯一：" + character.id());
             }
         }
         return characterIds;
     }
 
     /**
-     * 收集故事圣经中可引用的地点编号。
+     * 收集故事圣经中的所有地点 ID，并校验唯一性。
      *
      * @param storyBible 故事圣经。
-     * @return 地点编号集合。
+     * @return 地点 ID 的不可变集合。
+     * @throws IllegalArgumentException 当地点 ID 重复时抛出。
      */
     private static Set<String> collectLocationIds(StoryBible storyBible) {
         Set<String> locationIds = new HashSet<>();
         for (BibleLocation location : storyBible.locations()) {
             if (!locationIds.add(location.id())) {
-                throw new IllegalArgumentException("story bible location id must be unique: " + location.id());
+                throw new IllegalArgumentException("故事圣经中的地点 ID 必须唯一：" + location.id());
             }
         }
         return locationIds;
     }
 
     /**
-     * 校验章节摘要列表，并复制为不可变列表。
+     * 校验并复制章节摘要列表，确保非空且不包含 null 元素。
      *
-     * @param chapterDigests 原始章节摘要列表。
-     * @return 不可变章节摘要列表。
+     * @param chapterDigests 待校验的章节摘要列表。
+     * @return 不可变的章节摘要列表副本。
+     * @throws IllegalArgumentException 当列表为空或包含 null 元素时抛出。
      */
     private static List<ChapterDigest> requireChapterDigests(List<ChapterDigest> chapterDigests) {
         if (chapterDigests == null || chapterDigests.isEmpty()) {
-            throw new IllegalArgumentException("chapterDigests must not be empty");
+            throw new IllegalArgumentException("章节摘要列表不能为空");
         }
         return List.copyOf(chapterDigests.stream()
-                .map(digest -> Objects.requireNonNull(digest, "chapterDigests must not contain null"))
+                .map(digest -> Objects.requireNonNull(digest, "章节摘要列表中不能包含 null 元素"))
                 .toList());
     }
 
     /**
      * 场景规划阶段的输入快照。
      *
-     * @param projectId 项目主键。
-     * @param projectTitle 项目标题。
-     * @param chapterDigests 章节摘要列表。
-     * @param storyBible 故事圣经。
-     * @param format 剧本形式。
-     * @param tone 整体风格。
-     * @param dialogueDensity 对白密度。
-     * @param narrationRetention 旁白保留度。
-     * @param hasAdditionalInstructions 是否存在用户补充要求。
-     * @param additionalInstructions 用户补充要求。
+     * <p>该快照只用于计算 inputHash。只要项目、章节摘要列表、故事圣经或生成参数变化，
+     * 就会得到不同哈希，从而避免复用过期的场景规划。</p>
+     *
+     * @param projectId 项目 ID
+     * @param projectTitle 项目标题
+     * @param chapterDigests 章节摘要列表
+     * @param storyBible 故事圣经
+     * @param format 输出格式
+     * @param tone 语气风格
+     * @param dialogueDensity 对话密度
+     * @param narrationRetention 叙述保留度
+     * @param hasAdditionalInstructions 是否有额外指令
+     * @param additionalInstructions 额外指令内容
      */
     private record ScenePlanInput(
             Long projectId,
@@ -274,13 +402,13 @@ public class ScenePlanner {
             String additionalInstructions
     ) {
         /**
-         * 从当前场景规划上下文构造输入快照。
+         * 从项目、章节摘要列表、故事圣经和生成选项构建输入快照。
          *
          * @param project 小说改编项目。
          * @param chapterDigests 章节摘要列表。
          * @param storyBible 故事圣经。
-         * @param options 生成参数。
-         * @return 用于哈希计算的输入快照。
+         * @param options 生成选项。
+         * @return 输入快照对象。
          */
         private static ScenePlanInput from(NovelProject project, List<ChapterDigest> chapterDigests,
                                            StoryBible storyBible, GenerationOptions options) {

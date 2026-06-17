@@ -1,7 +1,6 @@
 package com.novelplayer.application.generation;
 
-import com.novelplayer.ai.StagedScriptAiClient;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+//import com.novelplayer.ai.StagedScriptAiClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
 import com.novelplayer.application.generation.model.BibleLocation;
 import com.novelplayer.application.generation.model.DraftSceneBlock;
@@ -31,8 +30,6 @@ import java.util.Set;
  * {@link ScriptDocument}，后续仍然复用现有的结构校验、YAML 导出、JSON 映射和文档落库链路。</p>
  */
 @Service
-//增加注解
-@ConditionalOnBean(StagedScriptAiClient.class)
 @ConditionalOnProperty(prefix = "novel-player.generation", name = "pipeline-mode", havingValue = "staged",
         matchIfMissing = true)
 public class ScriptAssembler {
