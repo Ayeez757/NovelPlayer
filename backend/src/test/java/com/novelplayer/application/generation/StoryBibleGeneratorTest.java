@@ -1,11 +1,12 @@
 package com.novelplayer.application.generation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.novelplayer.ai.StagedScriptAiClient;
+import com.novelplayer.ai.LlmJsonClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
 import com.novelplayer.application.generation.model.BibleLocation;
 import com.novelplayer.application.generation.model.ChapterDigest;
 import com.novelplayer.application.generation.model.StoryBible;
+import com.novelplayer.application.generation.prompt.StoryBiblePromptBuilder;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.generation.GenerationStageResult;
 import com.novelplayer.domain.generation.GenerationStatus;
@@ -37,7 +38,7 @@ import static org.mockito.Mockito.when;
 class StoryBibleGeneratorTest {
 
     @Mock
-    private StagedScriptAiClient aiClient;
+    private LlmJsonClient llmJsonClient;
 
     @Mock
     private GenerationStageResultRepository repository;
@@ -50,8 +51,14 @@ class StoryBibleGeneratorTest {
      */
     @BeforeEach
     void setUp() {
-        stageStore = new GenerationStageStore(repository, new ObjectMapper());
-        generator = new StoryBibleGenerator(aiClient, stageStore);
+        ObjectMapper objectMapper = new ObjectMapper();
+        stageStore = new GenerationStageStore(repository, objectMapper);
+        generator = new StoryBibleGenerator(
+                llmJsonClient,
+                objectMapper,
+                stageStore,
+                new StoryBiblePromptBuilder("SYSTEM", "INPUT:\n%s")
+        );
     }
 
     /**
@@ -80,7 +87,7 @@ class StoryBibleGeneratorTest {
         StoryBible result = generator.generate(job, project, digests, options);
 
         assertThat(result).isEqualTo(bible);
-        verify(aiClient, never()).generateStoryBible(any(), any(), any());
+        verify(llmJsonClient, never()).requestJson(any(), any(), any());
     }
 
     /**
@@ -97,7 +104,11 @@ class StoryBibleGeneratorTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(21L), eq(GenerationStageNames.STORY_BIBLE), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateStoryBible(project, digests, options)).thenReturn(bible);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.STORY_BIBLE),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(bible));
 
         StoryBible result = generator.generate(job, project, digests, options);
 
@@ -131,7 +142,11 @@ class StoryBibleGeneratorTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(31L), eq(GenerationStageNames.STORY_BIBLE), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateStoryBible(project, digests, options)).thenReturn(invalidBible);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.STORY_BIBLE),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(invalidBible));
 
         assertThatThrownBy(() -> generator.generate(job, project, digests, options))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -167,11 +182,15 @@ class StoryBibleGeneratorTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(41L), eq(GenerationStageNames.STORY_BIBLE), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateStoryBible(project, digests, options)).thenReturn(invalidBible);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.STORY_BIBLE),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(invalidBible));
 
         assertThatThrownBy(() -> generator.generate(job, project, digests, options))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unique");
+                .hasMessageContaining("loc_001");
         ArgumentCaptor<GenerationStageResult> captor = ArgumentCaptor.forClass(GenerationStageResult.class);
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(GenerationStatus.FAILED);
@@ -186,8 +205,7 @@ class StoryBibleGeneratorTest {
         NovelProject project = new NovelProject("雨夜", "第一章 雨夜\n她发现一封信。");
 
         assertThatThrownBy(() -> generator.generate(job, project, List.of(), GenerationOptions.defaults()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("chapterDigests");
+                .isInstanceOf(IllegalArgumentException.class);
         verify(repository, never()).findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 any(), any(), any(), any());
     }

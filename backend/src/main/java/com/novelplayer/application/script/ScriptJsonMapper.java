@@ -39,7 +39,7 @@ public class ScriptJsonMapper {
             return json;
         } catch (Exception exception) {
             log.warn("Script document serialization failed 剧本文档json序列化失败。schemaVersion={}", document.schemaVersion(), exception);
-            throw new IllegalStateException("Failed to serialize script document", exception);
+            throw new IllegalStateException("剧本文档json序列化失败", exception);
         }
     }
 }

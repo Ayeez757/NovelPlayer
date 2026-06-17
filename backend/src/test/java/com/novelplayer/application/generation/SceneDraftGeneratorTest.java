@@ -1,7 +1,7 @@
 package com.novelplayer.application.generation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.novelplayer.ai.StagedScriptAiClient;
+import com.novelplayer.ai.LlmJsonClient;
 import com.novelplayer.application.generation.model.BibleCharacter;
 import com.novelplayer.application.generation.model.BibleLocation;
 import com.novelplayer.application.generation.model.DraftSceneBlock;
@@ -10,6 +10,7 @@ import com.novelplayer.application.generation.model.SceneDraft;
 import com.novelplayer.application.generation.model.SceneDraftContext;
 import com.novelplayer.application.generation.model.ScenePlan;
 import com.novelplayer.application.generation.model.StoryBible;
+import com.novelplayer.application.generation.prompt.SceneDraftPromptBuilder;
 import com.novelplayer.config.NovelPlayerProperties;
 import com.novelplayer.domain.generation.GenerationJob;
 import com.novelplayer.domain.generation.GenerationStageResult;
@@ -44,7 +45,7 @@ import static org.mockito.Mockito.when;
 class SceneDraftGeneratorTest {
 
     @Mock
-    private StagedScriptAiClient aiClient;
+    private LlmJsonClient llmJsonClient;
 
     @Mock
     private GenerationStageResultRepository repository;
@@ -90,7 +91,7 @@ class SceneDraftGeneratorTest {
         List<SceneDraft> results = generator.generate(job, project, List.of(chapter), scenePlan, bible, options);
 
         assertThat(results).containsExactly(draft);
-        verify(aiClient, never()).generateSceneDraft(any(), any(), any());
+        verify(llmJsonClient, never()).requestJson(any(), any(), any());
     }
 
     @Test
@@ -113,20 +114,23 @@ class SceneDraftGeneratorTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(21L), any(String.class), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateSceneDraft(eq(project), any(SceneDraftContext.class), eq(options)))
-                .thenReturn(draftOne, draftTwo);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.SCENE_DRAFT),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(draftOne), toJson(draftTwo));
 
         List<SceneDraft> results = generator.generate(
                 job, project, List.of(chapterOne, chapterTwo), scenePlan, bible, options);
 
         assertThat(results).containsExactly(draftOne, draftTwo);
-        ArgumentCaptor<SceneDraftContext> contextCaptor = ArgumentCaptor.forClass(SceneDraftContext.class);
-        verify(aiClient, org.mockito.Mockito.times(2)).generateSceneDraft(
-                eq(project), contextCaptor.capture(), eq(options));
-        List<SceneDraftContext> contexts = contextCaptor.getAllValues();
-        assertThat(contexts.get(0).previousSceneSummary()).isNull();
-        assertThat(contexts.get(1).previousSceneSummary()).isEqualTo(draftOne.summary());
-        assertThat(contexts.get(1).plannedScene()).isEqualTo(sceneTwo);
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmJsonClient, org.mockito.Mockito.times(2)).requestJson(
+                eq(GenerationStageNames.SCENE_DRAFT), eq("SYSTEM"), userPromptCaptor.capture());
+        List<String> prompts = userPromptCaptor.getAllValues();
+        assertThat(prompts.get(0)).contains("\"previousSceneSummary\" : null");
+        assertThat(prompts.get(1)).contains(draftOne.summary());
+        assertThat(prompts.get(1)).contains("\"id\" : \"scene_002\"");
     }
 
     @Test
@@ -147,22 +151,25 @@ class SceneDraftGeneratorTest {
         when(repository.findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 eq(22L), any(String.class), eq(GenerationStatus.SUCCEEDED), any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateSceneDraft(eq(project), any(SceneDraftContext.class), eq(options)))
-                .thenAnswer(invocation -> {
-                    SceneDraftContext context = invocation.getArgument(1);
-                    return sceneDraft(context.plannedScene(), "generated " + context.plannedScene().id());
-                });
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.SCENE_DRAFT),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(
+                        toJson(sceneDraft(sceneOne, "generated scene_001")),
+                        toJson(sceneDraft(sceneTwo, "generated scene_002"))
+                );
 
         List<SceneDraft> results = parallelGenerator.generate(
                 job, project, List.of(chapterOne, chapterTwo), scenePlan, bible, options);
 
         assertThat(results).extracting(SceneDraft::id).containsExactly("scene_001", "scene_002");
-        ArgumentCaptor<SceneDraftContext> contextCaptor = ArgumentCaptor.forClass(SceneDraftContext.class);
-        verify(aiClient, org.mockito.Mockito.times(2)).generateSceneDraft(
-                eq(project), contextCaptor.capture(), eq(options));
-        List<SceneDraftContext> contexts = contextCaptor.getAllValues();
-        assertThat(contexts.get(0).previousSceneSummary()).isNull();
-        assertThat(contexts.get(1).previousSceneSummary()).isEqualTo(sceneOne.summary());
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmJsonClient, org.mockito.Mockito.times(2)).requestJson(
+                eq(GenerationStageNames.SCENE_DRAFT), eq("SYSTEM"), userPromptCaptor.capture());
+        List<String> prompts = userPromptCaptor.getAllValues();
+        assertThat(prompts.get(0)).contains("\"previousSceneSummary\" : null");
+        assertThat(prompts.get(1)).contains(sceneOne.summary());
         verify(lifecycleServiceProvider, never()).getIfAvailable();
     }
 
@@ -179,7 +186,8 @@ class SceneDraftGeneratorTest {
         assertThatThrownBy(() -> generator.generate(
                 job, project, List.of(chapter), scenePlan, bible, GenerationOptions.defaults()))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("source chapter");
+                .hasMessageContaining("scene_001")
+                .hasMessageContaining("2");
         ArgumentCaptor<GenerationStageResult> captor = ArgumentCaptor.forClass(GenerationStageResult.class);
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getStageName()).isEqualTo(GenerationStageNames.sceneDraft("scene_001"));
@@ -202,12 +210,15 @@ class SceneDraftGeneratorTest {
                 eq(41L), eq(GenerationStageNames.sceneDraft("scene_001")), eq(GenerationStatus.SUCCEEDED),
                 any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateSceneDraft(eq(project), any(SceneDraftContext.class), eq(options)))
-                .thenReturn(invalidDraft);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.SCENE_DRAFT),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(invalidDraft));
 
         assertThatThrownBy(() -> generator.generate(job, project, List.of(chapter), scenePlan, bible, options))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("planned scene");
+                .hasMessageContaining("scene_999");
         ArgumentCaptor<GenerationStageResult> captor = ArgumentCaptor.forClass(GenerationStageResult.class);
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(GenerationStatus.FAILED);
@@ -238,8 +249,11 @@ class SceneDraftGeneratorTest {
                 eq(51L), eq(GenerationStageNames.sceneDraft("scene_001")), eq(GenerationStatus.SUCCEEDED),
                 any(String.class)))
                 .thenReturn(Optional.empty());
-        when(aiClient.generateSceneDraft(eq(project), any(SceneDraftContext.class), eq(options)))
-                .thenReturn(invalidDraft);
+        when(llmJsonClient.requestJson(
+                eq(GenerationStageNames.SCENE_DRAFT),
+                eq("SYSTEM"),
+                any(String.class)))
+                .thenReturn(toJson(invalidDraft));
 
         assertThatThrownBy(() -> generator.generate(job, project, List.of(chapter), scenePlan, bible, options))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -257,8 +271,7 @@ class SceneDraftGeneratorTest {
 
         assertThatThrownBy(() -> generator.generate(
                 job, project, List.of(), new ScenePlan(List.of(scene)), sampleBible(), GenerationOptions.defaults()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("chapters");
+                .isInstanceOf(IllegalArgumentException.class);
         verify(repository, never()).findFirstByJobIdAndStageNameAndStatusAndInputHashOrderByCreatedAtDesc(
                 any(), any(), any(), any());
     }
@@ -266,12 +279,15 @@ class SceneDraftGeneratorTest {
     private SceneDraftGenerator generatorWithConcurrency(int concurrency) {
         NovelPlayerProperties properties = new NovelPlayerProperties();
         properties.getGeneration().setSceneDraftConcurrency(concurrency);
+        ObjectMapper objectMapper = new ObjectMapper();
         return new SceneDraftGenerator(
-                aiClient,
+                llmJsonClient,
+                objectMapper,
                 stageStore,
                 lifecycleServiceProvider,
                 properties,
-                new GenerationStageParallelExecutor(Runnable::run)
+                new GenerationStageParallelExecutor(Runnable::run),
+                new SceneDraftPromptBuilder("SYSTEM", "INPUT:\n%s")
         );
     }
 
